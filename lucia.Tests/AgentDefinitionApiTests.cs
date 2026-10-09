@@ -17,7 +17,7 @@ public sealed class AgentDefinitionApiTests
     {
         var repository = A.Fake<IAgentDefinitionRepository>();
         var existing = CreateDefinition(
-            id: "existing-id",
+            id: "route-id",
             name: "existing-name",
             displayName: "Existing Display",
             description: "Existing description",
@@ -36,7 +36,7 @@ public sealed class AgentDefinitionApiTests
             ]);
         var replacementRequest = CreateDefinition(
             id: "client-id",
-            name: "replacement-name",
+            name: "route-id",
             displayName: "Replacement Display",
             description: "Replacement description",
             instructions: "Replacement instructions",
@@ -60,11 +60,11 @@ public sealed class AgentDefinitionApiTests
             .Invokes(call => persisted = call.GetArgument<AgentDefinition>(0))
             .Returns(Task.CompletedTask);
 
-        await InvokeReplaceHandlerAsync("ReplaceDefinitionAsync", "route-id", replacementRequest, repository, A.Fake<IPromptCacheService>());
+        await InvokeReplaceHandlerAsync("route-id", replacementRequest, repository, A.Fake<IPromptCacheService>());
 
         Assert.NotNull(persisted);
         Assert.Equal("route-id", persisted.Id);
-        Assert.Equal("replacement-name", persisted.Name);
+        Assert.Equal("route-id", persisted.Name);
         Assert.Equal("Replacement Display", persisted.DisplayName);
         Assert.Equal("Replacement description", persisted.Description);
         Assert.Equal("Replacement instructions", persisted.Instructions);
@@ -87,7 +87,7 @@ public sealed class AgentDefinitionApiTests
     {
         var repository = A.Fake<IAgentDefinitionRepository>();
         var existing = CreateDefinition(
-            id: "existing-id",
+            id: "route-id",
             name: "existing-name",
             displayName: "Existing Display",
             description: "Existing description",
@@ -120,7 +120,8 @@ public sealed class AgentDefinitionApiTests
 
         Assert.NotNull(persisted);
         Assert.Same(existing, persisted);
-        Assert.Equal("existing-name", persisted.Name);
+        // Identity is the route Id: a legacy Name drift self-heals to the Id on any patch.
+        Assert.Equal("route-id", persisted.Name);
         Assert.Equal("Patched Display", persisted.DisplayName);
         Assert.Equal("Existing description", persisted.Description);
         Assert.Equal("Existing instructions", persisted.Instructions);
@@ -139,7 +140,7 @@ public sealed class AgentDefinitionApiTests
     {
         var repository = A.Fake<IAgentDefinitionRepository>();
         var existing = CreateDefinition(
-            id: "existing-id",
+            id: "route-id",
             name: "existing-name",
             displayName: "Existing Display",
             description: "Existing description",
@@ -179,7 +180,7 @@ public sealed class AgentDefinitionApiTests
     {
         var repository = A.Fake<IAgentDefinitionRepository>();
         var existing = CreateDefinition(
-            id: "existing-id",
+            id: "route-id",
             name: "existing-name",
             displayName: "Existing Display",
             description: "Existing description",
@@ -226,7 +227,7 @@ public sealed class AgentDefinitionApiTests
         var promptCache = A.Fake<IPromptCacheService>();
         A.CallTo(() => repository.GetAgentDefinitionAsync("route-id", A<CancellationToken>._))
             .Returns(CreateDefinition(
-                id: "existing-id", name: "existing-name", displayName: "Existing Display",
+                id: "route-id", name: "existing-name", displayName: "Existing Display",
                 description: "Existing description", instructions: "Existing instructions", enabled: true,
                 modelConnectionName: "existing-model", embeddingProviderName: null, isBuiltIn: false,
                 isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow.AddDays(-1), updatedAt: DateTime.UtcNow.AddDays(-1),
@@ -246,7 +247,7 @@ public sealed class AgentDefinitionApiTests
         var promptCache = A.Fake<IPromptCacheService>();
         A.CallTo(() => repository.GetAgentDefinitionAsync("route-id", A<CancellationToken>._))
             .Returns(CreateDefinition(
-                id: "existing-id", name: "existing-name", displayName: "Existing Display",
+                id: "route-id", name: "existing-name", displayName: "Existing Display",
                 description: "Existing description", instructions: "Existing instructions", enabled: true,
                 modelConnectionName: "existing-model", embeddingProviderName: null, isBuiltIn: false,
                 isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow.AddDays(-1), updatedAt: DateTime.UtcNow.AddDays(-1),
@@ -254,8 +255,8 @@ public sealed class AgentDefinitionApiTests
         A.CallTo(() => repository.UpsertAgentDefinitionAsync(A<AgentDefinition>._, A<CancellationToken>._))
             .Returns(Task.CompletedTask);
 
-        await InvokeReplaceHandlerAsync("ReplaceDefinitionAsync", "route-id", CreateDefinition(
-            id: "client-id", name: "replacement-name", displayName: "Replacement Display",
+        await InvokeReplaceHandlerAsync("route-id", CreateDefinition(
+            id: "client-id", name: "route-id", displayName: "Replacement Display",
             description: "Replacement description", instructions: "Replacement instructions", enabled: true,
             modelConnectionName: "new-model", embeddingProviderName: null, isBuiltIn: false,
             isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow, updatedAt: DateTime.UtcNow, tools: []), repository, promptCache);
@@ -313,6 +314,153 @@ public sealed class AgentDefinitionApiTests
         AssertEvicted(promptCache);
     }
 
+    [Fact]
+    public async Task CreateDefinitionAsync_DerivesNameFromId_WhenNameMissing()
+    {
+        var repository = A.Fake<IAgentDefinitionRepository>();
+        AgentDefinition? persisted = null;
+        A.CallTo(() => repository.UpsertAgentDefinitionAsync(A<AgentDefinition>._, A<CancellationToken>._))
+            .Invokes(call => persisted = call.GetArgument<AgentDefinition>(0))
+            .Returns(Task.CompletedTask);
+
+        var result = await InvokeCreateHandlerAsync(
+            CreateDefinition(
+                id: "research-agent", name: null!, displayName: "Research Agent",
+                description: "A custom agent", instructions: "Be helpful", enabled: true,
+                modelConnectionName: null, embeddingProviderName: null, isBuiltIn: false,
+                isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow, updatedAt: DateTime.UtcNow, tools: []),
+            repository, A.Fake<IPromptCacheService>());
+
+        Assert.NotNull(persisted);
+        Assert.Equal("research-agent", persisted.Name);
+        NotBadResult(result);
+    }
+
+    [Fact]
+    public async Task CreateDefinitionAsync_RejectsNonKebabCaseId()
+    {
+        var repository = A.Fake<IAgentDefinitionRepository>();
+
+        var result = await InvokeCreateHandlerAsync(
+            CreateDefinition(
+                id: "My Agent 1", name: "my-agent-1", displayName: "My Agent",
+                description: "A custom agent", instructions: "Be helpful", enabled: true,
+                modelConnectionName: null, embeddingProviderName: null, isBuiltIn: false,
+                isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow, updatedAt: DateTime.UtcNow, tools: []),
+            repository, A.Fake<IPromptCacheService>());
+
+        IsBadRequest(result, "kebab-case");
+        A.CallTo(() => repository.UpsertAgentDefinitionAsync(A<AgentDefinition>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task CreateDefinitionAsync_RejectsNameDifferentFromId()
+    {
+        var repository = A.Fake<IAgentDefinitionRepository>();
+
+        var result = await InvokeCreateHandlerAsync(
+            CreateDefinition(
+                id: "research-agent", name: "Research Agent", displayName: "Research Agent",
+                description: "A custom agent", instructions: "Be helpful", enabled: true,
+                modelConnectionName: null, embeddingProviderName: null, isBuiltIn: false,
+                isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow, updatedAt: DateTime.UtcNow, tools: []),
+            repository, A.Fake<IPromptCacheService>());
+
+        IsBadRequest(result, "must equal its id");
+        A.CallTo(() => repository.UpsertAgentDefinitionAsync(A<AgentDefinition>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task ReplaceDefinitionAsync_RejectsNameDifferentFromRouteId()
+    {
+        var repository = A.Fake<IAgentDefinitionRepository>();
+        A.CallTo(() => repository.GetAgentDefinitionAsync("route-id", A<CancellationToken>._))
+            .Returns(CreateDefinition(
+                id: "route-id", name: "route-id", displayName: "Existing Display",
+                description: "Existing description", instructions: "Existing instructions", enabled: true,
+                modelConnectionName: null, embeddingProviderName: null, isBuiltIn: false,
+                isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow.AddDays(-1), updatedAt: DateTime.UtcNow.AddDays(-1), tools: []));
+
+        var result = await InvokeReplaceHandlerAsync(
+            "route-id",
+            CreateDefinition(
+                id: "route-id", name: "other-name", displayName: "Replacement Display",
+                description: "Replacement description", instructions: "Replacement instructions", enabled: true,
+                modelConnectionName: null, embeddingProviderName: null, isBuiltIn: false,
+                isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow, updatedAt: DateTime.UtcNow, tools: []),
+            repository, A.Fake<IPromptCacheService>());
+
+        IsBadRequest(result, "must equal its id");
+        A.CallTo(() => repository.UpsertAgentDefinitionAsync(A<AgentDefinition>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task PatchDefinitionAsync_RejectsNameDifferentFromRouteId()
+    {
+        var repository = A.Fake<IAgentDefinitionRepository>();
+        A.CallTo(() => repository.GetAgentDefinitionAsync("route-id", A<CancellationToken>._))
+            .Returns(CreateDefinition(
+                id: "route-id", name: "route-id", displayName: "Existing Display",
+                description: "Existing description", instructions: "Existing instructions", enabled: true,
+                modelConnectionName: null, embeddingProviderName: null, isBuiltIn: false,
+                isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow.AddDays(-1), updatedAt: DateTime.UtcNow.AddDays(-1), tools: []));
+
+        var result = await InvokePatchHandlerAsync("route-id", new PatchAgentDefinitionRequest { Name = "other-name" }, repository, A.Fake<IPromptCacheService>());
+
+        IsBadRequest(result, "must equal its id");
+        A.CallTo(() => repository.UpsertAgentDefinitionAsync(A<AgentDefinition>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task PatchDefinitionAsync_SelfHealsLegacyNameToRouteId()
+    {
+        var repository = A.Fake<IAgentDefinitionRepository>();
+        AgentDefinition? persisted = null;
+        // Legacy document where Name drifted away from Id (the OW-agent incident shape).
+        A.CallTo(() => repository.GetAgentDefinitionAsync("route-id", A<CancellationToken>._))
+            .Returns(CreateDefinition(
+                id: "route-id", name: "legacy display name", displayName: "Existing Display",
+                description: "Existing description", instructions: "Existing instructions", enabled: true,
+                modelConnectionName: null, embeddingProviderName: null, isBuiltIn: false,
+                isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow.AddDays(-1), updatedAt: DateTime.UtcNow.AddDays(-1), tools: []));
+        A.CallTo(() => repository.UpsertAgentDefinitionAsync(A<AgentDefinition>._, A<CancellationToken>._))
+            .Invokes(call => persisted = call.GetArgument<AgentDefinition>(0))
+            .Returns(Task.CompletedTask);
+
+        var result = await InvokePatchHandlerAsync("route-id", new PatchAgentDefinitionRequest { DisplayName = "Patched" }, repository, A.Fake<IPromptCacheService>());
+
+        NotBadResult(result);
+        Assert.NotNull(persisted);
+        Assert.Equal("route-id", persisted.Name);
+    }
+
+    [Fact]
+    public async Task DeleteDefinitionAsync_UnregistersByAgentId_NotByName()
+    {
+        var repository = A.Fake<IAgentDefinitionRepository>();
+        var provider = A.Fake<IDynamicAgentProvider>();
+        var registry = A.Fake<IAgentRegistry>();
+        // Legacy document with drifted Name: deregistration must key on the Id
+        // because that is what the dynamic agent provider and A2A URL use.
+        A.CallTo(() => repository.GetAgentDefinitionAsync("route-id", A<CancellationToken>._))
+            .Returns(CreateDefinition(
+                id: "route-id", name: "legacy display name", displayName: "Custom",
+                description: "A custom agent", instructions: "Be helpful", enabled: true,
+                modelConnectionName: null, embeddingProviderName: null, isBuiltIn: false,
+                isRemote: false, isOrchestrator: false, createdAt: DateTime.UtcNow.AddDays(-1), updatedAt: DateTime.UtcNow.AddDays(-1), tools: []));
+
+        await InvokeDeleteHandlerAsync("route-id", repository, provider, registry, A.Fake<IPromptCacheService>());
+
+        A.CallTo(() => provider.Unregister("route-id")).MustHaveHappenedOnceExactly();
+        A.CallTo(() => provider.Unregister("legacy display name")).MustNotHaveHappened();
+        A.CallTo(() => registry.UnregisterAgentAsync("/a2a/route-id", A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+    }
+
     private static void AssertEvicted(IPromptCacheService promptCache)
     {
         // Any catalog-affecting change must drop cached routing decisions (their keys contain
@@ -321,9 +469,46 @@ public sealed class AgentDefinitionApiTests
         A.CallTo(() => promptCache.EvictAllChatEntriesAsync(A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
-    private static async Task InvokeReplaceHandlerAsync(string methodName, string id, AgentDefinition definition, IAgentDefinitionRepository repository, IPromptCacheService promptCache)
+    /// <summary>
+    /// Unwraps the concrete result (Created/Ok/Conflict/BadRequest/NotFound) from a
+    /// handler's Task&lt;Results&lt;...&gt;&gt; without referencing the generic Results type.
+    /// </summary>
+    private static object? GetHandlerResultValue(Task task)
     {
-        var method = typeof(AgentDefinitionApi).GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Static);
+        // Handlers return Task<Results<...>> (Microsoft.AspNetCore.Http.HttpResults.Results),
+        // whose concrete result is exposed via the 'Result' property. Task<T>.GetAwaiter() hides
+        // (does not override) Task.GetAwaiter(), so calling it through a static Task reference
+        // yields the non-generic awaiter — invoke GetAwaiter on the concrete type instead.
+        var getAwaiter = task.GetType().GetMethod("GetAwaiter")!;
+        var awaiter = getAwaiter.Invoke(task, null)!;
+        var results = awaiter.GetType().GetMethod("GetResult")!.Invoke(awaiter, null);
+        return results?.GetType().GetProperty("Result")?.GetValue(results);
+    }
+
+    private static void NotBadResult(object? result)
+    {
+        Assert.NotNull(result);
+        Assert.False(
+            result.GetType().Name.StartsWith("BadRequest", StringComparison.Ordinal),
+            $"Expected a successful result but got {result.GetType().Name}: {GetResultPayload(result)}");
+    }
+
+    private static void IsBadRequest(object? result, string expectedMessagePart)
+    {
+        Assert.NotNull(result);
+        Assert.True(
+            result.GetType().Name.StartsWith("BadRequest", StringComparison.Ordinal),
+            $"Expected BadRequest but got {result.GetType().Name}: {GetResultPayload(result)}");
+        var payload = GetResultPayload(result);
+        Assert.Contains(expectedMessagePart, payload);
+    }
+
+    private static string? GetResultPayload(object? result)
+        => result?.GetType().GetProperty("Value")?.GetValue(result) as string;
+
+    private static async Task<object?> InvokeReplaceHandlerAsync(string id, AgentDefinition definition, IAgentDefinitionRepository repository, IPromptCacheService promptCache)
+    {
+        var method = typeof(AgentDefinitionApi).GetMethod("ReplaceDefinitionAsync", BindingFlags.NonPublic | BindingFlags.Static);
 
         Assert.NotNull(method);
 
@@ -331,9 +516,10 @@ public sealed class AgentDefinitionApiTests
 
         Assert.NotNull(task);
         await task.ConfigureAwait(false);
+        return GetHandlerResultValue(task);
     }
 
-    private static async Task InvokePatchHandlerAsync(string id, PatchAgentDefinitionRequest request, IAgentDefinitionRepository repository, IPromptCacheService promptCache)
+    private static async Task<object?> InvokePatchHandlerAsync(string id, PatchAgentDefinitionRequest request, IAgentDefinitionRepository repository, IPromptCacheService promptCache)
     {
         var method = typeof(AgentDefinitionApi).GetMethod("PatchDefinitionAsync", BindingFlags.NonPublic | BindingFlags.Static);
 
@@ -343,9 +529,10 @@ public sealed class AgentDefinitionApiTests
 
         Assert.NotNull(task);
         await task.ConfigureAwait(false);
+        return GetHandlerResultValue(task);
     }
 
-    private static async Task InvokeCreateHandlerAsync(AgentDefinition definition, IAgentDefinitionRepository repository, IPromptCacheService promptCache)
+    private static async Task<object?> InvokeCreateHandlerAsync(AgentDefinition definition, IAgentDefinitionRepository repository, IPromptCacheService promptCache)
     {
         var method = typeof(AgentDefinitionApi).GetMethod("CreateDefinitionAsync", BindingFlags.NonPublic | BindingFlags.Static);
 
@@ -355,6 +542,7 @@ public sealed class AgentDefinitionApiTests
 
         Assert.NotNull(task);
         await task.ConfigureAwait(false);
+        return GetHandlerResultValue(task);
     }
 
     private static async Task InvokeDeleteHandlerAsync(string id, IAgentDefinitionRepository repository, IDynamicAgentProvider provider, IAgentRegistry registry, IPromptCacheService promptCache)
