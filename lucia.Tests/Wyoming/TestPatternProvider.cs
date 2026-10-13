@@ -16,5 +16,6 @@ internal sealed class TestPatternProvider(CommandPattern[] patterns) : ICommandP
             Templates = pattern.Templates.ToArray(),
             MinConfidence = pattern.MinConfidence,
             Priority = pattern.Priority,
+            IsQuery = pattern.IsQuery,
         }).ToList();
 }
