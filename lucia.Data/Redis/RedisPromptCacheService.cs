@@ -14,6 +14,7 @@ using Microsoft.Extensions.Options;
 
 using lucia.Agents.Models;
 using lucia.Agents.Orchestration.Models;
+using lucia.Agents.Services;
 
 using StackExchange.Redis;
 

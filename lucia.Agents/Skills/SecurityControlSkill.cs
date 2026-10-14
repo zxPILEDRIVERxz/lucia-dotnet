@@ -450,9 +450,8 @@ public sealed partial class SecurityControlSkill : IAgentSkill, IOptimizableSkil
         activity?.SetTag("security.area", area);
         activity?.SetTag("security.entity", entityName);
         StatusRequests.Add(1);
-        var start = Stopwatch.GetTimestamp();
 
-        try
+        return await ToolRunner.RunAsync(_logger, activity, "Unable to retrieve security state right now.", async () =>
         {
             var entities = await ResolveEntitiesAsync(GetStatusDomains(), area, entityName).ConfigureAwait(false);
             if (entities.Count == 0)
@@ -484,18 +483,11 @@ public sealed partial class SecurityControlSkill : IAgentSkill, IOptimizableSkil
 
             activity?.SetStatus(ActivityStatusCode.Ok);
             return builder.ToString().TrimEnd();
-        }
-        catch (Exception ex)
-        {
-            StatusFailures.Add(1, [new KeyValuePair<string, object?>("reason", "exception")]);
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            LogSecurityOperationFailed(_logger, ex, "get security state", area ?? entityName ?? "all visible areas");
-            return "Unable to retrieve security state right now.";
-        }
-        finally
-        {
-            RecordDuration(activity, start, "get_state");
-        }
+        },
+            onFailure: () => StatusFailures.Add(1, [new KeyValuePair<string, object?>("reason", "exception")]),
+            duration: OperationDurationMs,
+            detail: area ?? entityName ?? "all visible areas",
+            durationTag: new("operation", "get_state")).ConfigureAwait(false);
     }
 
     /// <summary>
