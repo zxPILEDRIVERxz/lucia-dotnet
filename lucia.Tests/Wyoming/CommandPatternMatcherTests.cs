@@ -347,20 +347,3 @@ public sealed class CommandPatternMatcherTests
         Assert.Equal("office", result.CapturedValues["area"]);
     }
 }
-
-file sealed class TestPatternProvider(CommandPattern[] patterns) : ICommandPatternProvider
-{
-    private readonly CommandPattern[] _patterns = patterns;
-
-    public IReadOnlyList<CommandPatternDefinition> GetCommandPatterns() =>
-        _patterns.Select(static pattern => new CommandPatternDefinition
-        {
-            Id = pattern.Id,
-            SkillId = pattern.SkillId,
-            Action = pattern.Action,
-            Templates = pattern.Templates.ToArray(),
-            MinConfidence = pattern.MinConfidence,
-            Priority = pattern.Priority,
-            IsQuery = pattern.IsQuery,
-        }).ToList();
-}
