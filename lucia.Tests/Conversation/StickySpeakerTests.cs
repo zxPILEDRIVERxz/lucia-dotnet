@@ -18,9 +18,10 @@ using Microsoft.Extensions.Time.Testing;
 namespace lucia.Tests.Conversation;
 
 /// <summary>
-/// Multi-turn voice follow-ups must stay in the same conversation even when speaker
-/// verification fails on a short turn ("The kitchen.", "Okay."). The last recognized
-/// speaker is remembered per conversation and applied until it expires.
+/// Multi-turn voice follow-ups can stay in the same conversation even when speaker
+/// verification fails on a short turn ("The kitchen.", "Okay."), but only while the
+/// sticky-speaker option is enabled and unknown voices are not being ignored. The last
+/// recognized speaker is remembered per conversation and applied until it expires.
 /// </summary>
 public sealed class StickySpeakerTests : IDisposable
 {
@@ -36,6 +37,7 @@ public sealed class StickySpeakerTests : IDisposable
     private readonly ICommandRouter _router = A.Fake<ICommandRouter>();
     private readonly IServiceProvider _services = A.Fake<IServiceProvider>();
     private readonly AgentHostTelemetrySource _telemetry = new();
+    private readonly MutableOptionsMonitor<VoiceProfileOptions> _voiceOptions;
     private readonly ConversationCommandProcessor _processor;
 
     public StickySpeakerTests()
@@ -54,6 +56,7 @@ public sealed class StickySpeakerTests : IDisposable
         A.CallTo(() => _services.GetService(A<Type>._)).Returns(null);
 
         var reconstructor = new ContextReconstructor(new UserContextProvider(_memories), _history);
+        _voiceOptions = new MutableOptionsMonitor<VoiceProfileOptions>(new VoiceProfileOptions());
         _processor = new ConversationCommandProcessor(
             _router,
             A.Fake<IDirectSkillExecutor>(),
@@ -69,8 +72,16 @@ public sealed class StickySpeakerTests : IDisposable
             chatHistoryProvider: _history,
             voiceTurns: _turns,
             speakerProfiles: _profiles,
-            stickySpeakers: _sticky);
+            stickySpeakers: _sticky,
+            voiceProfileOptions: _voiceOptions);
     }
+
+    private void SetVoiceOptions(bool stickyFollowUps, bool ignoreUnknownVoices) =>
+        _voiceOptions.CurrentValue = new VoiceProfileOptions
+        {
+            StickySpeakerFollowUps = stickyFollowUps,
+            IgnoreUnknownVoices = ignoreUnknownVoices,
+        };
 
     public void Dispose() => _telemetry.Dispose();
 
@@ -105,9 +116,25 @@ public sealed class StickySpeakerTests : IDisposable
     }
 
     [Fact]
-    public async Task ProcessAsync_UnrecognizedVoiceFollowUp_UsesStickySpeakerContext()
+    public void StickyStore_TtlFromOptions_UsesConfiguredLifetime()
     {
-        // Arrange — prior recognized turns left history + a sticky speaker for this conversation
+        var store = new StickySpeakerStore(
+            _clock,
+            new FixedOptions<VoiceProfileOptions>(new VoiceProfileOptions { StickySpeakerTtlSeconds = 120 }));
+        store.Remember("conv-ttl", DanielProfileId);
+
+        _clock.Advance(TimeSpan.FromSeconds(119));
+        Assert.Equal(DanielProfileId, store.Get("conv-ttl"));
+
+        _clock.Advance(TimeSpan.FromSeconds(2));
+        Assert.Null(store.Get("conv-ttl"));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_UnrecognizedVoiceFollowUp_FeatureEnabled_UsesStickySpeakerContext()
+    {
+        // Arrange — sticky follow-ups enabled; prior recognized turns left history + a sticky speaker
+        SetVoiceOptions(stickyFollowUps: true, ignoreUnknownVoices: false);
         await _history.AppendTurnAsync(DanielProfileId, "Set a timer for fifteen seconds.", "Okay, 15 seconds. Starting now.");
         _sticky.Remember("conv-a", DanielProfileId);
 
@@ -125,9 +152,10 @@ public sealed class StickySpeakerTests : IDisposable
     }
 
     [Fact]
-    public async Task ProcessAsync_RecognizedVoiceTurn_RemembersStickySpeaker()
+    public async Task ProcessAsync_RecognizedVoiceTurn_FeatureEnabled_RemembersStickySpeaker()
     {
         // Arrange
+        SetVoiceOptions(stickyFollowUps: true, ignoreUnknownVoices: false);
         var request = CreateVoiceRequest("conv-b", "turn on the kitchen light",
             speaker: new SpeakerIdentification
             {
@@ -145,9 +173,10 @@ public sealed class StickySpeakerTests : IDisposable
     }
 
     [Fact]
-    public async Task ProcessAsync_RecognizedSpeaker_OverridesStaleStickySpeaker()
+    public async Task ProcessAsync_RecognizedSpeaker_FeatureEnabled_OverridesStaleStickySpeaker()
     {
         // Arrange — Daniel was last seen in this conversation, but Sarah is speaking now
+        SetVoiceOptions(stickyFollowUps: true, ignoreUnknownVoices: false);
         _sticky.Remember("conv-c", DanielProfileId);
         var request = CreateVoiceRequest("conv-c", "play some jazz",
             speaker: new SpeakerIdentification
@@ -169,7 +198,8 @@ public sealed class StickySpeakerTests : IDisposable
     [Fact]
     public async Task ProcessAsync_UnrecognizedVoiceWithoutStickySpeaker_StaysAnonymous()
     {
-        // Arrange — history exists for Daniel but this conversation never resolved a speaker
+        // Arrange — feature enabled, but history exists for Daniel and this conversation never resolved a speaker
+        SetVoiceOptions(stickyFollowUps: true, ignoreUnknownVoices: false);
         await _history.AppendTurnAsync(DanielProfileId, "Set a timer for fifteen seconds.", "Okay, 15 seconds. Starting now.");
 
         var request = CreateVoiceRequest("conv-d", "The kitchen.", speaker: null);
@@ -180,6 +210,87 @@ public sealed class StickySpeakerTests : IDisposable
         // Assert — baseline behavior preserved: anonymous session, no cross-speaker history leak
         Assert.Equal($"voice:conv-d:anonymous", result.EngineSessionId);
         Assert.DoesNotContain("RECENT CHAT HISTORY", result.LlmPrompt!);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_UnrecognizedVoiceFollowUp_DefaultConfig_StaysAnonymous()
+    {
+        // Arrange — default options leave sticky follow-ups off; a stale store entry must not apply
+        await _history.AppendTurnAsync(DanielProfileId, "Set a timer for fifteen seconds.", "Okay, 15 seconds. Starting now.");
+        _sticky.Remember("conv-e", DanielProfileId);
+
+        var request = CreateVoiceRequest("conv-e", "The kitchen.", speaker: null);
+
+        // Act
+        var result = await _processor.ProcessAsync(request);
+
+        // Assert — an unrecognized speaker never reaches the remembered profile's session or memory scope
+        Assert.Equal($"voice:conv-e:anonymous", result.EngineSessionId);
+        Assert.DoesNotContain("RECENT CHAT HISTORY", result.LlmPrompt!);
+        Assert.DoesNotContain("[Speaker: Daniel]", result.LlmPrompt);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_RecognizedVoiceTurn_DefaultConfig_DoesNotRemember()
+    {
+        // Arrange — sticky follow-ups off: nothing may be retained for a disabled feature
+        var request = CreateVoiceRequest("conv-f", "turn on the kitchen light",
+            speaker: new SpeakerIdentification
+            {
+                ProfileId = SarahProfileId,
+                Name = "Sarah",
+                Similarity = 0.93f,
+                IsAuthorized = true
+            });
+
+        // Act
+        await _processor.ProcessAsync(request);
+
+        // Assert
+        Assert.Null(_sticky.Get("conv-f"));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_IgnoreUnknownVoicesOn_ToggleOn_NoStickyIdentity()
+    {
+        // Arrange — feature toggle on, but unknown voices are ignored: sticky must never apply
+        SetVoiceOptions(stickyFollowUps: true, ignoreUnknownVoices: true);
+        _sticky.Remember("conv-g", DanielProfileId);
+
+        var request = CreateVoiceRequest("conv-g", "The kitchen.", speaker: null);
+
+        // Act
+        var result = await _processor.ProcessAsync(request);
+
+        // Assert — server-side enforcement wins over the stored toggle value
+        Assert.Equal($"voice:conv-g:anonymous", result.EngineSessionId);
+        Assert.DoesNotContain("[Speaker: Daniel]", result.LlmPrompt!);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_OptionToggledMidConversation_TakesEffectWithoutRestart()
+    {
+        // Turn 1 — enabled: the recognized speaker is remembered
+        SetVoiceOptions(stickyFollowUps: true, ignoreUnknownVoices: false);
+        await _processor.ProcessAsync(CreateVoiceRequest("conv-h", "play some jazz",
+            speaker: new SpeakerIdentification
+            {
+                ProfileId = SarahProfileId,
+                Name = "Sarah",
+                Similarity = 0.91f,
+                IsAuthorized = true
+            }));
+        Assert.Equal(SarahProfileId, _sticky.Get("conv-h"));
+
+        // Turn 2 — disabled: the follow-up stays anonymous despite the live entry
+        SetVoiceOptions(stickyFollowUps: false, ignoreUnknownVoices: false);
+        var off = await _processor.ProcessAsync(CreateVoiceRequest("conv-h", "Louder.", speaker: null));
+        Assert.Equal($"voice:conv-h:anonymous", off.EngineSessionId);
+
+        // Turn 3 — re-enabled: sticky identity applies again until the entry expires
+        SetVoiceOptions(stickyFollowUps: true, ignoreUnknownVoices: false);
+        var on = await _processor.ProcessAsync(CreateVoiceRequest("conv-h", "A bit more bass.", speaker: null));
+        Assert.Equal($"voice:conv-h:{SarahProfileId}", on.EngineSessionId);
     }
 
     private ConversationRequest CreateVoiceRequest(
@@ -199,5 +310,21 @@ public sealed class StickySpeakerTests : IDisposable
                 DeviceType = "Satellite1"
             }
         };
+    }
+
+    private sealed class FixedOptions<T>(T value) : IOptions<T> where T : class
+    {
+        public T Value => value;
+    }
+
+    private sealed class MutableOptionsMonitor<T> : IOptionsMonitor<T>
+    {
+        public T CurrentValue { get; set; }
+
+        public MutableOptionsMonitor(T initialValue) => CurrentValue = initialValue;
+
+        public T Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 }
