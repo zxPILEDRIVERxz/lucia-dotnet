@@ -121,16 +121,15 @@ public static class AgentDefinitionApi
             return TypedResults.Conflict($"Agent id '{definition.Id}' conflicts with a built-in agent");
         }
 
-        // Create must never overwrite an existing definition — the repository upserts by Id,
-        // so an in-use id would silently replace the live agent's configuration.
-        if (await repository.GetAgentDefinitionAsync(definition.Id).ConfigureAwait(false) is not null)
+        // Create must never overwrite an existing definition. The insert is atomic at the
+        // repository level, so concurrent creates of the same id cannot clobber each other.
+        definition.CreatedAt = DateTime.UtcNow;
+        definition.UpdatedAt = DateTime.UtcNow;
+        if (!await repository.InsertAgentDefinitionIfAbsentAsync(definition).ConfigureAwait(false))
         {
             return TypedResults.Conflict($"An agent with id '{definition.Id}' already exists.");
         }
 
-        definition.CreatedAt = DateTime.UtcNow;
-        definition.UpdatedAt = DateTime.UtcNow;
-        await repository.UpsertAgentDefinitionAsync(definition).ConfigureAwait(false);
         await EvictPromptCachesAsync(promptCache);
         return TypedResults.Created($"/api/agent-definitions/{definition.Id}", definition);
     }
@@ -141,6 +140,14 @@ public static class AgentDefinitionApi
         [FromServices] IAgentDefinitionRepository repository,
         [FromServices] IPromptCacheService promptCache)
     {
+        // The route Id doubles as the A2A URL segment (/a2a/{id}), so it must stay a
+        // stable kebab-case slug — the same rule Create enforces on new ids.
+        if (!AgentIdPattern.IsMatch(id))
+        {
+            return TypedResults.BadRequest(
+                $"Agent id '{id}' must be kebab-case (lowercase letters, digits, and hyphens), e.g. 'research-agent'.");
+        }
+
         var existing = await repository.GetAgentDefinitionAsync(id).ConfigureAwait(false);
         if (existing is null)
         {
@@ -184,6 +191,12 @@ public static class AgentDefinitionApi
         [FromServices] IAgentDefinitionRepository repository,
         [FromServices] IPromptCacheService promptCache)
     {
+        if (!AgentIdPattern.IsMatch(id))
+        {
+            return TypedResults.BadRequest(
+                $"Agent id '{id}' must be kebab-case (lowercase letters, digits, and hyphens), e.g. 'research-agent'.");
+        }
+
         var existing = await repository.GetAgentDefinitionAsync(id).ConfigureAwait(false);
         if (existing is null)
         {
