@@ -182,7 +182,7 @@ public sealed class ModelProviderResolver : IModelProviderResolver
         var signatureStore = _serviceProvider.GetRequiredService<ThoughtSignatureStore>();
         var handler = new ThoughtSignatureEchoHandler(signatureStore)
         {
-            InnerHandler = ToolSchemaCompatHandler.CreateForNetwork()
+            InnerHandler = new SocketsHttpHandler()
         };
 
         return new HttpClientPipelineTransport(new HttpClient(handler));
