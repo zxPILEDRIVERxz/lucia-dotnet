@@ -151,4 +151,45 @@ public sealed class QueryDecomposerTests
         Assert.Contains(intent.CandidateAreaNames,
             c => c.StartsWith("Zack ", StringComparison.OrdinalIgnoreCase));
     }
+
+    // ── Cover command decomposition ──────────────────────────────
+
+    [Fact]
+    public void Decompose_OpenGarageDoors_ExtractsOpenAction()
+    {
+        // Act
+        var intent = QueryDecomposer.Decompose("open the garage doors", speakerId: null);
+
+        // Assert — cover verbs are valid actions; "garage doors" is the entity phrase, not an area
+        Assert.Equal("open", intent.Action);
+        Assert.Equal("garage doors", intent.ExplicitLocation);
+        Assert.Null(intent.DeviceType);
+        Assert.False(intent.IsComplex);
+    }
+
+    [Fact]
+    public void Decompose_CloseGarageDoors_ExtractsCloseAction()
+    {
+        // Act
+        var intent = QueryDecomposer.Decompose("close the garage doors", speakerId: null);
+
+        // Assert
+        Assert.Equal("close", intent.Action);
+        Assert.Equal("garage doors", intent.ExplicitLocation);
+        Assert.Null(intent.DeviceType);
+        Assert.False(intent.IsComplex);
+    }
+
+    [Fact]
+    public void Decompose_StopGarageDoor_ExtractsStopAction()
+    {
+        // Act
+        var intent = QueryDecomposer.Decompose("stop the garage door", speakerId: null);
+
+        // Assert
+        Assert.Equal("stop", intent.Action);
+        Assert.Equal("garage door", intent.ExplicitLocation);
+        Assert.Null(intent.DeviceType);
+        Assert.False(intent.IsComplex);
+    }
 }

@@ -15,7 +15,8 @@ internal sealed partial class QueryDecomposer
     private static readonly HashSet<string> ActionValues = new(StringComparer.OrdinalIgnoreCase)
     {
         "on", "off", "toggle", "dim", "brighten", "set", "increase", "decrease",
-        "warmer", "cooler", "hotter", "colder", "activate"
+        "warmer", "cooler", "hotter", "colder", "activate",
+        "open", "close", "stop"
     };
 
     private static readonly HashSet<string> DeviceTypeTokens = new(StringComparer.OrdinalIgnoreCase)

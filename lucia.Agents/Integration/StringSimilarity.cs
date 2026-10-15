@@ -78,6 +78,40 @@ public static class StringSimilarity
         return total / source.Length;
     }
 
+    /// <summary>
+    /// True when every core token of the candidate phrase appears in the entity name,
+    /// ignoring plural "-s" endings (e.g. "garage doors" is contained in
+    /// "Crystal's Garage Door"). Single-token phrases are rejected so area-style
+    /// queries keep their existing behavior.
+    /// </summary>
+    public static bool CoreTokensContained(string candidate, string name)
+    {
+        var candidateTokens = ExtractCoreTokens(candidate);
+        if (candidateTokens.Length < 2)
+            return false;
+
+        var nameTokens = ExtractCoreTokens(name);
+        if (nameTokens.Length == 0)
+            return false;
+
+        var nameSet = new HashSet<string>(nameTokens, StringComparer.OrdinalIgnoreCase);
+        foreach (var token in nameTokens)
+            AddSingularForm(nameSet, token);
+
+        return candidateTokens.All(token =>
+            nameSet.Contains(token)
+            || HasSingularFormIn(token, nameSet));
+    }
+
+    private static void AddSingularForm(HashSet<string> set, string token)
+    {
+        if (token.Length > 3 && token.EndsWith('s'))
+            set.Add(token[..^1]);
+    }
+
+    private static bool HasSingularFormIn(string token, HashSet<string> nameSet) =>
+        token.Length > 3 && token.EndsWith('s') && nameSet.Contains(token[..^1]);
+
     // ── Phonetic (Metaphone) ───────────────────────────────────────
 
     /// <summary>

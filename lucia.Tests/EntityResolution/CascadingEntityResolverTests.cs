@@ -532,6 +532,65 @@ public sealed class CascadingEntityResolverTests
         Assert.Equal(BailReason.NoMatch, result.BailReason);
     }
 
+    // ── Cover commands: entity phrases match cover names ─────────
+
+    [Fact]
+    public void Resolve_OpenGarageDoors_BothCoversInGarage_ResolvesBoth()
+    {
+        // Arrange — mirrors production: two garage doors in the same "Garage" area
+        var garage = CreateArea("garage", "Garage");
+        var entities = new[]
+        {
+            CreateEntity("cover.crystals_garage_door", "Crystal's Garage Door", "garage"),
+            CreateEntity("cover.daniels_garage_door", "Daniel's Garage Door", "garage")
+        };
+        var locationService = SetupLocationService(areas: [garage], entities: entities);
+
+        var resolver = new CascadingEntityResolver(locationService);
+
+        // Act — plural phrase should match every garage door, not bail on unknown verb
+        var result = resolver.Resolve(
+            "open the garage doors",
+            callerArea: null,
+            speakerId: null,
+            domains: ["cover"]);
+
+        // Assert
+        Assert.True(result.IsResolved);
+        Assert.Equal(2, result.ResolvedEntityIds.Count);
+        Assert.Contains("cover.crystals_garage_door", result.ResolvedEntityIds);
+        Assert.Contains("cover.daniels_garage_door", result.ResolvedEntityIds);
+        Assert.Null(result.BailReason);
+    }
+
+    [Fact]
+    public void Resolve_CloseNamedGarageDoor_ResolvesSingleCover()
+    {
+        // Arrange
+        var garage = CreateArea("garage", "Garage");
+        var entities = new[]
+        {
+            CreateEntity("cover.crystals_garage_door", "Crystal's Garage Door", "garage"),
+            CreateEntity("cover.daniels_garage_door", "Daniel's Garage Door", "garage")
+        };
+        var locationService = SetupLocationService(areas: [garage], entities: entities);
+
+        var resolver = new CascadingEntityResolver(locationService);
+
+        // Act — named door resolves to exactly that cover
+        var result = resolver.Resolve(
+            "close crystal's garage door",
+            callerArea: null,
+            speakerId: null,
+            domains: ["cover"]);
+
+        // Assert
+        Assert.True(result.IsResolved);
+        Assert.Single(result.ResolvedEntityIds);
+        Assert.Equal("cover.crystals_garage_door", result.ResolvedEntityIds[0]);
+        Assert.Null(result.BailReason);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────
 
     private static FloorInfo CreateFloor(string floorId, string name, string[]? aliases = null) => new()

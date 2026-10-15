@@ -408,6 +408,24 @@ public sealed class CascadingEntityResolver : ICascadingEntityResolver
                 matched.Add(entity);
         }
 
+        if (matched.Count > 0)
+            return matched;
+
+        // Final tier: every core token of the phrase appears in the entity name
+        // (plural-tolerant). Catches phrases like "garage doors" → "Crystal's Garage Door"
+        // that score just under the fuzzy thresholds above.
+        foreach (var entity in candidates)
+        {
+            if (uniqueCandidates.Any(name =>
+                    StringSimilarity.CoreTokensContained(name, entity.FriendlyName)
+                    || entity.Aliases.Any(alias =>
+                        StringSimilarity.CoreTokensContained(name, alias))))
+            {
+                if (matchedIds.Add(entity.EntityId))
+                    matched.Add(entity);
+            }
+        }
+
         return matched;
     }
 
