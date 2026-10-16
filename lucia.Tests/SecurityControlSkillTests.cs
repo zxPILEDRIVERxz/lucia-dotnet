@@ -182,6 +182,7 @@ public sealed class SecurityControlSkillTests
                 Attributes = new Dictionary<string, object>
                 {
                     ["friendly_name"] = "Crystal's Garage Door",
+                    ["device_class"] = "garage",
                 },
             }));
         A.CallTo(() => homeAssistantClient.GetEntityStateAsync("lock.front_door", A<CancellationToken>._))
@@ -224,9 +225,67 @@ public sealed class SecurityControlSkillTests
         var result = await skill.GetSecurityStatus("garage");
 
         Assert.Contains("Crystal's Garage Door", result, StringComparison.Ordinal);
-        Assert.Contains("door is open", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("garage door is open", result, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Front Door", result, StringComparison.Ordinal);
         Assert.Contains("door is locked", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetSecurityStateAsync_Covers_UseDeviceClassNouns()
+    {
+        var homeAssistantClient = A.Fake<IHomeAssistantClient>();
+        A.CallTo(() => homeAssistantClient.GetEntityStateAsync("cover.bedroom_window", A<CancellationToken>._))
+            .Returns(Task.FromResult<HomeAssistantState?>(new HomeAssistantState
+            {
+                EntityId = "cover.bedroom_window",
+                State = "open",
+                Attributes = new Dictionary<string, object>
+                {
+                    ["friendly_name"] = "Bedroom Window",
+                    ["device_class"] = "window",
+                },
+            }));
+        A.CallTo(() => homeAssistantClient.GetEntityStateAsync("cover.patio_cover", A<CancellationToken>._))
+            .Returns(Task.FromResult<HomeAssistantState?>(new HomeAssistantState
+            {
+                EntityId = "cover.patio_cover",
+                State = "closed",
+                Attributes = new Dictionary<string, object>
+                {
+                    ["friendly_name"] = "Patio Cover",
+                },
+            }));
+
+        var locationService = A.Fake<IEntityLocationService>();
+        A.CallTo(() => locationService.SearchHierarchyAsync(
+                "garage",
+                A<HybridMatchOptions?>._,
+                A<IReadOnlyList<string>?>.That.Matches(domains => domains != null && domains.Contains("cover")),
+                A<CancellationToken>._))
+            .Returns(Task.FromResult(CreateSearchResult(
+                new HomeAssistantEntity
+                {
+                    EntityId = "cover.bedroom_window",
+                    FriendlyName = "Bedroom Window",
+                    AreaId = "garage",
+                },
+                new HomeAssistantEntity
+                {
+                    EntityId = "cover.patio_cover",
+                    FriendlyName = "Patio Cover",
+                    AreaId = "garage",
+                })));
+
+        var skill = new SecurityControlSkill(
+            homeAssistantClient,
+            NullLogger<SecurityControlSkill>.Instance,
+            locationService,
+            new TestOptionsMonitor<SecurityControlSkillOptions>(new SecurityControlSkillOptions()));
+
+        var result = await skill.GetSecurityStateAsync("garage", null);
+
+        Assert.Contains("window is open", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cover is closed", result, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

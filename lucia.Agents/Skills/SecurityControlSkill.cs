@@ -651,20 +651,45 @@ public sealed partial class SecurityControlSkill : IAgentSkill, IOptimizableSkil
 
     private string FormatStatus(HomeAssistantEntity entity, HomeAssistantState state, bool includeArea)
     {
-            var status = state.State.Replace("_", " ", StringComparison.Ordinal);
-            var areaName = includeArea ? _locationService.GetAreaForEntity(entity.EntityId)?.Name : null;
-            var locationSuffix = string.IsNullOrWhiteSpace(areaName) ? string.Empty : $" in {areaName}";
+        var status = state.State.Replace("_", " ", StringComparison.Ordinal);
+        var areaName = includeArea ? _locationService.GetAreaForEntity(entity.EntityId)?.Name : null;
+        var locationSuffix = string.IsNullOrWhiteSpace(areaName) ? string.Empty : $" in {areaName}";
 
-            return entity.Domain switch
-            {
-                "alarm_control_panel" => $"alarm is {status}{locationSuffix}",
-                "lock" => $"door is {status}{locationSuffix}",
-                "cover" => $"door is {status}{locationSuffix}",
-                "camera" => _options.CurrentValue.EnableCameraSnapshot
-                    ? $"camera is {status}{locationSuffix}; snapshots enabled"
-                    : $"camera is {status}{locationSuffix}",
-                _ => $"state is {status}{locationSuffix}"
-            };
+        return entity.Domain switch
+        {
+            "alarm_control_panel" => $"alarm is {status}{locationSuffix}",
+            "lock" => $"door is {status}{locationSuffix}",
+            "cover" => $"{CoverNoun(state)} is {status}{locationSuffix}",
+            "camera" => _options.CurrentValue.EnableCameraSnapshot
+                ? $"camera is {status}{locationSuffix}; snapshots enabled"
+                : $"camera is {status}{locationSuffix}",
+            _ => $"state is {status}{locationSuffix}"
+        };
+    }
+
+    /// <summary>
+    /// Labels a cover by its HA device class (garage, gate, window, …) so status
+    /// output reads "garage door is open" instead of a blanket "door"; covers without
+    /// a device class are reported as generic covers.
+    /// </summary>
+    private static string CoverNoun(HomeAssistantState state)
+    {
+        var deviceClass = state.Attributes.TryGetValue("device_class", out var value) ? value?.ToString() : null;
+
+        return deviceClass switch
+        {
+            "garage" => "garage door",
+            "gate" => "gate",
+            "door" => "door",
+            "window" => "window",
+            "blind" => "blind",
+            "shutter" => "shutter",
+            "curtain" => "curtain",
+            "shade" => "shade",
+            "awning" => "awning",
+            "damper" => "damper",
+            _ => "cover",
+        };
     }
 
     private IReadOnlyList<string> GetStatusDomains()
