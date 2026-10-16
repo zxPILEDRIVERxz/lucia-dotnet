@@ -8,7 +8,10 @@ namespace lucia.Agents.Integration;
 /// When a function call's name does not exactly match any registered tool but exactly
 /// one registered tool ends with "__{requestedName}", the call is rewritten to the full
 /// registered name before the response reaches the caller. Exact matches, unknown names
-/// and ambiguous suffixes pass through unchanged.
+/// and ambiguous suffixes pass through unchanged. Rewrites replace the affected
+/// FunctionCallContent entries in place on the original response objects, so every other
+/// property (finish reason, ids, usage, additional properties, ...) is preserved without
+/// having to be copied explicitly.
 /// </summary>
 public sealed class TolerantToolNameChatClient : DelegatingChatClient
 {
@@ -33,7 +36,16 @@ public sealed class TolerantToolNameChatClient : DelegatingChatClient
         CancellationToken cancellationToken = default)
     {
         var response = await base.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
-        return Normalize(response);
+
+        if (response.Messages is not null)
+        {
+            foreach (var message in response.Messages)
+            {
+                RewriteContents(message.Contents);
+            }
+        }
+
+        return response;
     }
 
     public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -43,92 +55,58 @@ public sealed class TolerantToolNameChatClient : DelegatingChatClient
     {
         await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken).ConfigureAwait(false))
         {
-            yield return Normalize(update);
+            if (update.Contents is not null)
+            {
+                RewriteContents(update.Contents);
+            }
+
+            yield return update;
         }
     }
 
-    private ChatResponse Normalize(ChatResponse response)
+    private void RewriteContents(IList<AIContent> contents)
     {
-        if (response.Messages is not { Count: > 0 })
-            return response;
-
-        var (messages, changed) = NormalizeMessages(response.Messages);
-        if (!changed)
-            return response;
-
-        return new ChatResponse(messages)
+        for (var i = 0; i < contents.Count; i++)
         {
-            ModelId = response.ModelId,
-            Usage = response.Usage
-        };
-    }
-
-    private ChatResponseUpdate Normalize(ChatResponseUpdate update)
-    {
-        if (update.Contents is not { Count: > 0 } || !update.Contents.OfType<FunctionCallContent>().Any())
-            return update;
-
-        var contents = new List<AIContent>(update.Contents.Count);
-        foreach (var content in update.Contents)
-        {
-            if (content is FunctionCallContent fc && TryResolveFullName(fc.Name, out var fullName))
-            {
-                _logger.LogWarning(
-                    "Model returned abbreviated tool name '{BareName}'; rewriting to registered name '{FullName}'",
-                    fc.Name, fullName);
-                contents.Add(new FunctionCallContent(fc.CallId, fullName, fc.Arguments));
-            }
-            else
-            {
-                contents.Add(content);
-            }
-        }
-
-        return new ChatResponseUpdate(update.Role, contents)
-        {
-            ModelId = update.ModelId,
-            FinishReason = update.FinishReason,
-            MessageId = update.MessageId,
-            ResponseId = update.ResponseId,
-            ConversationId = update.ConversationId,
-            CreatedAt = update.CreatedAt
-        };
-    }
-
-    private (List<ChatMessage> Messages, bool Changed) NormalizeMessages(IEnumerable<ChatMessage> messages)
-    {
-        var result = new List<ChatMessage>(messages.Count());
-        var changed = false;
-
-        foreach (var message in messages)
-        {
-            if (message.Contents is not { Count: > 0 } || !message.Contents.OfType<FunctionCallContent>().Any())
-            {
-                result.Add(message);
+            if (contents[i] is not FunctionCallContent call)
                 continue;
-            }
 
-            var contents = new List<AIContent>(message.Contents.Count);
-            foreach (var content in message.Contents)
-            {
-                if (content is FunctionCallContent fc && TryResolveFullName(fc.Name, out var fullName))
-                {
-                    _logger.LogWarning(
-                        "Model returned abbreviated tool name '{BareName}'; rewriting to registered name '{FullName}'",
-                        fc.Name, fullName);
-                    contents.Add(new FunctionCallContent(fc.CallId, fullName, fc.Arguments));
-                    changed = true;
-                }
-                else
-                {
-                    contents.Add(content);
-                }
-            }
+            if (!TryResolveFullName(call.Name, out var fullName))
+                continue;
 
-            result.Add(new ChatMessage(message.Role, contents) { MessageId = message.MessageId });
+            _logger.LogWarning(
+                "Model returned abbreviated tool name '{BareName}'; rewriting to registered name '{FullName}'",
+                call.Name, fullName);
+            contents[i] = WithName(call, fullName);
+        }
+    }
+
+    private static FunctionCallContent WithName(FunctionCallContent call, string newName)
+    {
+        var rewritten = new FunctionCallContent(call.CallId, newName, call.Arguments)
+        {
+            Exception = call.Exception,
+            InformationalOnly = call.InformationalOnly,
+            RawRepresentation = call.RawRepresentation
+        };
+
+        if (call.Annotations is { Count: > 0 })
+        {
+            rewritten.Annotations = [..call.Annotations];
         }
 
-        return (result, changed);
+        if (call.AdditionalProperties is { Count: > 0 })
+        {
+            var properties = new AdditionalPropertiesDictionary();
+            foreach (var property in call.AdditionalProperties)
+            {
+                properties[property.Key] = property.Value;
+            }
+
+            rewritten.AdditionalProperties = properties;
+        }
+
+        return rewritten;
     }
 
     private bool TryResolveFullName(string requestedName, out string fullName)
