@@ -175,19 +175,19 @@ public static class ReportExporter
             .SelectMany(a => a.ModelResults)
             .Where(m => m.ParameterProfile is not null)
             .Select(m => (m.ModelName, Profile: m.ParameterProfile!))
-            .DistinctBy(x => x.ModelName)
+            .DistinctBy(x => (x.ModelName, x.Profile))
             .ToList();
 
         if (profiles.Count == 0) return;
 
         sb.AppendLine("## Model Parameters");
         sb.AppendLine();
-        sb.AppendLine("| Model | Profile | Temperature | Top-K | Top-P | Repeat Penalty | Seed |");
-        sb.AppendLine("|-------|---------|-------------|-------|-------|----------------|------|");
+        sb.AppendLine("| Model | Profile | Temperature | Top-K | Top-P | Repeat Penalty | Seed | Requested context | Output limit |");
+        sb.AppendLine("|-------|---------|-------------|-------|-------|----------------|------|-------------------|--------------|");
 
         foreach (var (modelName, profile) in profiles)
         {
-            sb.AppendLine($"| {modelName} | {profile.Name} | {profile.Temperature} | {profile.TopK} | {profile.TopP} | {profile.RepeatPenalty} | {profile.Seed?.ToString() ?? "–"} |");
+            sb.AppendLine($"| {modelName} | {profile.Name} | {profile.Temperature} | {profile.TopK} | {profile.TopP} | {profile.RepeatPenalty} | {profile.Seed?.ToString() ?? "–"} | {profile.NumContext?.ToString() ?? "Not configured"} | {profile.NumPredict} |");
         }
         sb.AppendLine();
     }
@@ -206,7 +206,7 @@ public static class ReportExporter
             {
                 var result = tc.Score.HasValue ? (tc.Passed ? "✅" : "❌") : "N/A";
                 var failure = tc.FailureReason is not null
-                    ? Truncate(tc.FailureReason, 80)
+                    ? Truncate(tc.FailureReason, 240)
                     : "–";
                 var latency = tc.Score.HasValue ? (double?)tc.Latency.TotalMilliseconds : null;
                 sb.AppendLine($"| {i++} | {tc.TestCaseId} | {result} | {FormatScore(tc.Score, tc.JudgeStatus)} | {FormatMs(latency)} | {CostReportFormatting.Tokens(tc.Cost)} | {CostReportFormatting.Cost(tc.Cost)} | {failure} |");
@@ -303,6 +303,7 @@ public static class ReportExporter
                     topK = m.ParameterProfile.TopK,
                     topP = m.ParameterProfile.TopP,
                     numPredict = m.ParameterProfile.NumPredict,
+                    numContext = m.ParameterProfile.NumContext,
                     repeatPenalty = m.ParameterProfile.RepeatPenalty,
                     seed = m.ParameterProfile.Seed
                 } : null,
@@ -325,7 +326,23 @@ public static class ReportExporter
                     judgeStatus = tc.JudgeStatus,
                     judgeReason = tc.JudgeReason,
                     latencyMs = tc.Latency.TotalMilliseconds,
-                    failureReason = tc.FailureReason
+                    failureReason = tc.FailureReason,
+                    agentOutput = tc.AgentOutput,
+                    routing = tc.Routing is null ? null : new
+                    {
+                        agentId = tc.Routing.AgentId,
+                        confidence = tc.Routing.Confidence,
+                        reasoning = tc.Routing.Reasoning,
+                        instructions = tc.Routing.Instructions,
+                        agentResponses = tc.Routing.AgentResponses
+                    },
+                    toolCalls = tc.ToolCalls?.Select(static call => new
+                    {
+                        order = call.Order,
+                        tool = call.ToolName,
+                        arguments = call.Arguments,
+                        error = call.Error
+                    })
                 })
             })
         })

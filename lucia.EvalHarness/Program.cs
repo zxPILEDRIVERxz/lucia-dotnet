@@ -139,7 +139,7 @@ var modelsByBackend = new Dictionary<string, IReadOnlyList<string>>(StringCompar
 foreach (var backend in selectedBackends)
 {
     modelsByBackend[backend.Name] = ModelSelector.Select(discoveredByBackend[backend.Name], backend.Name);
-    if (backend.Type is InferenceBackendType.AzureFoundry or InferenceBackendType.OpenRouter)
+    if (!backend.NoProviderCharge)
     {
         foreach (var model in modelsByBackend[backend.Name])
         {
@@ -218,6 +218,7 @@ if (evalType == EvalTypeSelector.PersonalityEval)
     AnsiConsole.WriteLine();
 
     var reports = new List<lucia.EvalHarness.Personality.PersonalityEvalReport>();
+    var personalityInferenceProfile = config.GetAllProfiles()["default"];
     foreach (var backend in selectedBackends)
     {
         reports.AddRange(await lucia.EvalHarness.Personality.PersonalityEvalDisplay.RunWithProgressAsync(
@@ -229,8 +230,9 @@ if (evalType == EvalTypeSelector.PersonalityEval)
             personalityProfiles,
             config.AgentTimeout,
             config.JudgeTimeout,
-            chatClientFactory: model => BackendChatClientFactory.CreateChatClient(backend, model),
-            backendName: selectedBackends.Count > 1 ? backend.Name : null));
+            chatClientFactory: model => BackendChatClientFactory.CreateChatClient(backend, model, personalityInferenceProfile),
+            backendName: selectedBackends.Count > 1 ? backend.Name : null,
+            parameterProfile: personalityInferenceProfile));
     }
 
     lucia.EvalHarness.Personality.PersonalityEvalDisplay.RenderReport(reports);
