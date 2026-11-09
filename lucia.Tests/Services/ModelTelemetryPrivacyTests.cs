@@ -23,7 +23,11 @@ public sealed class ModelTelemetryPrivacyTests
     [InlineData(ProviderType.GoogleGemini)]
     public void Chat_DefaultsToOneContentCapturingTelemetryWrapper(ProviderType type)
     {
-        using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        // Fork-only DI: the OpenAI-compatible transport resolves ThoughtSignatureStore for the echo handler.
+        using var services = new ServiceCollection().AddLogging()
+            .AddSingleton(TimeProvider.System)
+            .AddSingleton<ThoughtSignatureStore>()
+            .BuildServiceProvider();
         var resolver = new ModelProviderResolver(new StubHttpClientFactory(), NullLogger<ModelProviderResolver>.Instance, services);
         using var client = resolver.CreateClient(Provider(type));
         var wrappers = new List<OpenTelemetryChatClient>();
@@ -48,7 +52,11 @@ public sealed class ModelTelemetryPrivacyTests
     [InlineData(ProviderType.GoogleGemini)]
     public void Embeddings_DefaultToOneContentCapturingTelemetryWrapper(ProviderType type)
     {
-        using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        // Fork-only DI: the OpenAI-compatible transport resolves ThoughtSignatureStore for the echo handler.
+        using var services = new ServiceCollection().AddLogging()
+            .AddSingleton(TimeProvider.System)
+            .AddSingleton<ThoughtSignatureStore>()
+            .BuildServiceProvider();
         var resolver = new ModelProviderResolver(new StubHttpClientFactory(), NullLogger<ModelProviderResolver>.Instance, services);
         using var generator = resolver.CreateEmbeddingGenerator(Provider(type));
         var wrappers = new List<OpenTelemetryEmbeddingGenerator<string, Embedding<float>>>();
@@ -81,7 +89,11 @@ public sealed class ModelTelemetryPrivacyTests
     [InlineData(ProviderType.GoogleGemini)]
     public void Chat_ContentCaptureCanBeTurnedOff(ProviderType type)
     {
-        using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        // Fork-only DI: the OpenAI-compatible transport resolves ThoughtSignatureStore for the echo handler.
+        using var services = new ServiceCollection().AddLogging()
+            .AddSingleton(TimeProvider.System)
+            .AddSingleton<ThoughtSignatureStore>()
+            .BuildServiceProvider();
         var options = A.Fake<IOptionsMonitor<ModelTelemetryOptions>>();
         A.CallTo(() => options.CurrentValue).Returns(new ModelTelemetryOptions { IncludeModelContent = false });
         var resolver = new ModelProviderResolver(new StubHttpClientFactory(), NullLogger<ModelProviderResolver>.Instance, services, options);
@@ -99,7 +111,11 @@ public sealed class ModelTelemetryPrivacyTests
     [InlineData(ProviderType.GoogleGemini)]
     public void Embeddings_ContentCaptureCanBeTurnedOff(ProviderType type)
     {
-        using var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        // Fork-only DI: the OpenAI-compatible transport resolves ThoughtSignatureStore for the echo handler.
+        using var services = new ServiceCollection().AddLogging()
+            .AddSingleton(TimeProvider.System)
+            .AddSingleton<ThoughtSignatureStore>()
+            .BuildServiceProvider();
         var options = A.Fake<IOptionsMonitor<ModelTelemetryOptions>>();
         A.CallTo(() => options.CurrentValue).Returns(new ModelTelemetryOptions { IncludeModelContent = false });
         var resolver = new ModelProviderResolver(new StubHttpClientFactory(), NullLogger<ModelProviderResolver>.Instance, services, options);
