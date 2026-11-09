@@ -499,7 +499,7 @@ lucia-dotnet/
 │   └── plugins/                  # Agent Framework plugins
 
 ├── lucia.Agents/                 # Shared agent implementations and orchestration
-│   ├── Abstractions/             # ILuciaPlugin, IWebSearchSkill, IEntityLocationService, IHybridEntityMatcher
+│   ├── Abstractions/             # ILuciaPlugin, IWebSearchSkill, IWeatherSkill, IEntityLocationService, IHybridEntityMatcher
 │   ├── Agents/                   # GeneralAgent, LightAgent, ClimateAgent, SceneAgent, ListsAgent, OrchestratorAgent
 │   ├── Configuration/            # Plugin, repository, and manifest models
 │   ├── Extensions/               # PluginLoader, PluginScriptHost, service registrations
@@ -791,6 +791,8 @@ public sealed class SearXngPlugin : ILuciaPlugin
 // ... skill class, then:
 new SearXngPlugin()
 ```
+
+**WeatherAPI.com Weather** (`plugins/weather-api/`) — Registers `IWeatherSkill` so the GeneralAgent gains a `get_weather` tool for current conditions and multi-day forecasts. Activates when `WeatherApi:ApiKey` (or the `WEATHERAPI_KEY` environment variable) is set; default location, units, forecast days, and AQI/pollen/alerts toggles are editable from the dashboard's **Plugins** page under *WeatherAPI.com*.
 
 ### Plugin Repository System
 

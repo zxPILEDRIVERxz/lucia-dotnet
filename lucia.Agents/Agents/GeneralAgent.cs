@@ -19,6 +19,7 @@ public sealed class GeneralAgent : ILuciaAgent
     private readonly IAgentDefinitionRepository _definitionRepository;
     private readonly IMcpToolRegistry _toolRegistry;
     private readonly IWebSearchSkill? _webSearchSkill;
+    private readonly IWeatherSkill? _weatherSkill;
     private readonly TracingChatClientFactory _tracingFactory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<GeneralAgent> _logger;
@@ -43,17 +44,24 @@ public sealed class GeneralAgent : ILuciaAgent
         IMcpToolRegistry toolRegistry,
         TracingChatClientFactory tracingFactory,
         ILoggerFactory loggerFactory,
-        IWebSearchSkill? webSearchSkill = null)
+        IWebSearchSkill? webSearchSkill = null,
+        IWeatherSkill? weatherSkill = null)
     {
         _clientResolver = clientResolver;
         _definitionRepository = definitionRepository;
         _toolRegistry = toolRegistry;
         _webSearchSkill = webSearchSkill;
+        _weatherSkill = weatherSkill;
         _tracingFactory = tracingFactory;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<GeneralAgent>();
 
-        Tools = _webSearchSkill?.GetTools() ?? [];
+        var pluginTools = new List<AITool>();
+        if (_webSearchSkill is not null)
+            pluginTools.AddRange(_webSearchSkill.GetTools());
+        if (_weatherSkill is not null)
+            pluginTools.AddRange(_weatherSkill.GetTools());
+        Tools = pluginTools;
 
         // Create the agent card for registration
         var skills = new List<AgentSkill>();
@@ -63,7 +71,7 @@ public sealed class GeneralAgent : ILuciaAgent
             Name = "Personal memory",
             Description = "Handle personal memory requests such as 'remember I prefer tea', 'what do you know about me', and 'forget my preference' for an enrolled speaker."
         });
-        if (Tools.Count > 0)
+        if (_webSearchSkill is not null)
         {
             skills.Add(new AgentSkill
             {
@@ -72,14 +80,30 @@ public sealed class GeneralAgent : ILuciaAgent
                 Description = "Search the web for current events, news, and facts",
             });
         }
+        if (_weatherSkill is not null)
+        {
+            skills.Add(new AgentSkill
+            {
+                Id = "id_weather",
+                Name = "Weather",
+                Description = "Current weather conditions and multi-day forecasts",
+            });
+        }
+
+        var descriptionParts = new List<string>();
+        if (_webSearchSkill is not null)
+            descriptionParts.Add("web search");
+        if (_weatherSkill is not null)
+            descriptionParts.Add("weather forecasts");
+        var agentDescription = descriptionParts.Count > 0
+            ? $"Agent for general knowledge, {string.Join(", ", descriptionParts)}, and personal memory requests in Home Assistant"
+            : "Agent for handling #general-knowledge questions and personal memory requests in Home Assistant";
 
         _agent = new AgentCard
         {
             SupportedInterfaces = [new AgentInterface { Url = "/a2a/general-assistant" }],
             Name = AgentId,
-            Description = Tools.Count > 0
-                ? "Agent for general knowledge, web search, and personal memory requests in Home Assistant"
-                : "Agent for handling #general-knowledge questions and personal memory requests in Home Assistant",
+            Description = agentDescription,
             Capabilities = new AgentCapabilities
             {
                 PushNotifications = false,
@@ -91,8 +115,11 @@ public sealed class GeneralAgent : ILuciaAgent
             Version = "1.0.0",
         };
 
-        var webSearchHint = Tools.Count > 0
+        var webSearchHint = _webSearchSkill is not null
             ? "\n- When asked about recent events, news, or facts that may change, use the web_search tool to find current information before answering."
+            : "";
+        var weatherHint = _weatherSkill is not null
+            ? "\n- For current weather conditions or forecasts, use the get_weather tool instead of guessing; base your answer on its data."
             : "";
 
         var instructions = """
@@ -104,7 +131,7 @@ public sealed class GeneralAgent : ILuciaAgent
                 - If you do not know the answer, simply state in your response "I do not know."
                 - Try to answer the user's request to the best of your ability. Keep your response short
                     enough to be about 6-10 seconds of audio. Roughly about 2 sentences at most.
-                """ + webSearchHint + """
+                """ + webSearchHint + weatherHint + """
 
                 ## IMPORTANT
                 * Keep your responses short. Aim for about 2 sentences max.
@@ -137,6 +164,9 @@ public sealed class GeneralAgent : ILuciaAgent
         if (_webSearchSkill is not null)
             await _webSearchSkill.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
+        if (_weatherSkill is not null)
+            await _weatherSkill.InitializeAsync(cancellationToken).ConfigureAwait(false);
+
         await ApplyDefinitionAsync(cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("General Knowledge initialized successfully");
@@ -160,7 +190,11 @@ public sealed class GeneralAgent : ILuciaAgent
                 Instructions = definition.Instructions;
 
             // Resolve MCP tools from the agent definition and merge with plugin-provided tools
-            var pluginTools = _webSearchSkill?.GetTools() ?? [];
+            var pluginTools = new List<AITool>();
+            if (_webSearchSkill is not null)
+                pluginTools.AddRange(_webSearchSkill.GetTools());
+            if (_weatherSkill is not null)
+                pluginTools.AddRange(_weatherSkill.GetTools());
             var mcpTools = definition?.Tools.Count > 0
                 ? await _toolRegistry.ResolveToolsAsync(definition.Tools, cancellationToken).ConfigureAwait(false)
                 : [];

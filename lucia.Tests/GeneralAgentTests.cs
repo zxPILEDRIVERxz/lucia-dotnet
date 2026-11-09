@@ -7,6 +7,7 @@ using lucia.Agents.Services;
 using lucia.Agents.Training;
 using lucia.Tests.Data;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace lucia.Tests;
@@ -182,16 +183,35 @@ public sealed class GeneralAgentTests
         Assert.Equal([null, "model-y"], appliedConnections);
     }
 
+    [Fact]
+    public void Ctor_WhenWeatherSkillRegistered_ExposesWeatherToolAndInstructionHint()
+    {
+        // Arrange — a real tool built the same way plugins/weather-api/plugin.cs does
+        var weatherSkill = A.Fake<IWeatherSkill>();
+        var tool = AIFunctionFactory.Create(() => "sunny", new AIFunctionFactoryOptions { Name = "get_weather" });
+        A.CallTo(() => weatherSkill.GetTools()).Returns(new List<AITool> { tool });
+
+        // Act
+        var agent = CreateAgent(A.Fake<IChatClientResolver>(), A.Fake<IAgentDefinitionRepository>(), weatherSkill);
+
+        // Assert
+        var exposed = Assert.Single(agent.Tools);
+        Assert.Equal("get_weather", exposed.Name);
+        Assert.Contains("get_weather", agent.Instructions);
+    }
+
     private static GeneralAgent CreateAgent(
         IChatClientResolver resolver,
-        IAgentDefinitionRepository repository)
+        IAgentDefinitionRepository repository,
+        IWeatherSkill? weatherSkill = null)
     {
         return new GeneralAgent(
             resolver,
             repository,
             A.Fake<IMcpToolRegistry>(),
             new TracingChatClientFactory(A.Fake<ITraceRepository>(), NullLoggerFactory.Instance),
-            NullLoggerFactory.Instance);
+            NullLoggerFactory.Instance,
+            weatherSkill: weatherSkill);
     }
 
     private static AgentDefinition CreateDefinition(
