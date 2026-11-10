@@ -138,6 +138,15 @@ public sealed class PluginSystemTests : IDisposable
         var apiKey = Assert.Single(plugin.ConfigProperties, p => p.Name == "ApiKey");
         Assert.True(apiKey.IsSensitive);
         Assert.All(plugin.ConfigProperties, p => Assert.Equal("string", p.Type));
+
+        // Automatic home location: gated on by default, with a visible status line for the dashboard
+        var useHome = Assert.Single(plugin.ConfigProperties, p => p.Name == "UseHomeLocation");
+        Assert.Equal("true", useHome.DefaultValue);
+        Assert.Contains(plugin.ConfigProperties, p => p.Name == "DefaultLocation");
+
+        // The plugin surfaces live status (resolved home location / key issues) to the dashboard
+        var statusProvider = Assert.IsAssignableFrom<IPluginStatusProvider>(plugin);
+        Assert.False(string.IsNullOrWhiteSpace(statusProvider.StatusLine));
     }
 
     // ── Test 2: PluginLoader loads all present plugins ──────────────

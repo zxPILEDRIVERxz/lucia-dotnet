@@ -561,6 +561,7 @@ export interface PluginConfigSchema {
   pluginId: string
   section: string
   description: string
+  status?: string
   properties: PluginConfigPropertySchema[]
 }
 

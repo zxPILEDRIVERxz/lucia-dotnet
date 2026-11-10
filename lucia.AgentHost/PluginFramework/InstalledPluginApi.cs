@@ -99,6 +99,7 @@ public static class InstalledPluginApi
                 PluginId = p.PluginId,
                 Section = p.ConfigSection!,
                 Description = p.ConfigDescription ?? "",
+                Status = (p as IPluginStatusProvider)?.StatusLine ?? "",
                 Properties = p.ConfigProperties.Select(cp => new PluginConfigPropertyDto
                 {
                     Name = cp.Name,

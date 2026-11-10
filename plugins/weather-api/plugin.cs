@@ -7,6 +7,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using lucia.Agents.Abstractions;
+using lucia.HomeAssistant.Models;
+using lucia.HomeAssistant.Services;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -20,6 +22,7 @@ public sealed class WeatherApiOptions
 {
     public string ApiKey { get; init; } = "";
     public string DefaultLocation { get; init; } = "";
+    public bool UseHomeLocation { get; init; } = true;
     public int DefaultDays { get; init; } = 3;
     public bool MetricUnits { get; init; }
     public bool IncludeAqi { get; init; } = true;
@@ -28,6 +31,41 @@ public sealed class WeatherApiOptions
     public int ShowHourlyPeek { get; init; } = 6;
     public int MaxResponseChars { get; init; } = 650;
     public int TimeoutSeconds { get; init; } = 12;
+}
+
+/// <summary>
+/// The home location read from Home Assistant's system configuration
+/// (the user's onboarding coordinates) plus a human-readable display name.
+/// </summary>
+public sealed record WeatherHomeLocation(double Latitude, double Longitude, string DisplayName);
+
+/// <summary>
+/// Decides which location a weather lookup targets when the user doesn't name one:
+/// a place named in the question wins, then the configured default override,
+/// then the automatic Home Assistant home coordinates (when enabled and usable).
+/// Coordinates are unambiguous to WeatherAPI's geocoder; bare postal codes are not.
+/// </summary>
+public static class WeatherQueryResolver
+{
+    public static string? Resolve(string? requestedLocation, string? defaultOverride, bool useHomeLocation, WeatherHomeLocation? home)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedLocation))
+            return requestedLocation.Trim();
+
+        if (!string.IsNullOrWhiteSpace(defaultOverride))
+            return defaultOverride.Trim();
+
+        if (useHomeLocation && IsUsable(home))
+            return Coordinates(home!);
+
+        return null;
+    }
+
+    public static bool IsUsable(WeatherHomeLocation? home) =>
+        home is not null && (home.Latitude != 0 || home.Longitude != 0);
+
+    public static string Coordinates(WeatherHomeLocation home) =>
+        $"{home.Latitude:0.######}, {home.Longitude:0.######}";
 }
 
 /// <summary>
@@ -359,11 +397,12 @@ public sealed class WeatherHourDto
     public string? ConditionText() => Condition?.Text ?? Condition?.Value;
 }
 
-public sealed class WeatherApiSkill : IWeatherSkill
+public sealed class WeatherApiSkill : IWeatherSkill, IPluginStatusProvider
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly WeatherApiOptions _options;
     private readonly ILogger _logger;
+    private readonly IHomeAssistantClient? _homeAssistant;
 
     private static readonly ActivitySource ActivitySource = new("Lucia.Skills.Weather.WeatherApi", "1.0.0");
     private static readonly Meter Meter = new("Lucia.Skills.Weather.WeatherApi", "1.0.0");
@@ -373,32 +412,126 @@ public sealed class WeatherApiSkill : IWeatherSkill
 
     private static readonly JsonSerializerOptions DeserializationOptions = new() { PropertyNameCaseInsensitive = true };
 
-    public WeatherApiSkill(IHttpClientFactory httpClientFactory, WeatherApiOptions options, ILogger logger)
+    private WeatherHomeLocation? _home;
+    private string? _statusLine;
+    private string _apiNote = "";
+
+    public string? StatusLine => _statusLine;
+
+    public WeatherApiSkill(IHttpClientFactory httpClientFactory, WeatherApiOptions options, ILogger logger, IHomeAssistantClient? homeAssistant = null)
     {
         _httpClientFactory = httpClientFactory;
         _options = options;
         _logger = logger;
+        _homeAssistant = homeAssistant;
     }
 
     public IList<AITool> GetTools() => [AIFunctionFactory.Create(GetWeatherAsync, new AIFunctionFactoryOptions { Name = "get_weather" })];
 
-    public Task InitializeAsync(CancellationToken cancellationToken = default)
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
+        if (_options.UseHomeLocation)
+            await TryLoadHomeLocationAsync(cancellationToken).ConfigureAwait(false);
+        else
+            _statusLine = "Automatic home location is disabled — DefaultLocation is used when no place is named.";
+
         _logger.LogInformation("WeatherAPI skill initialized (default location: {Location}, units: {Units}).",
             string.IsNullOrWhiteSpace(_options.DefaultLocation) ? "<not set>" : _options.DefaultLocation,
             _options.MetricUnits ? "metric" : "us");
-        return Task.CompletedTask;
     }
 
-    [Description("Get current weather conditions and a multi-day forecast from WeatherAPI.com. Use for questions like 'what's the weather', 'will it rain tomorrow', or 'forecast this weekend'. Returns compact text: current conditions, any alerts, daily high/low, and optionally the next few hours.")]
+    /// <summary>
+    /// Reads the home coordinates from Home Assistant's system configuration and resolves a
+    /// human-readable place name with one lightweight forecast call (which also verifies the API key).
+    /// Every failure mode is non-fatal and reported via <see cref="StatusLine"/> on the dashboard.
+    /// </summary>
+    private async Task TryLoadHomeLocationAsync(CancellationToken cancellationToken)
+    {
+        if (_homeAssistant is null)
+        {
+            _statusLine = "No Home Assistant connection available — automatic home location skipped.";
+            return;
+        }
+
+        ConfigResponse config;
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+            config = await _homeAssistant.GetConfigAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read the Home Assistant home location; weather will use the configured default location.");
+            _statusLine = "Home Assistant is unreachable — home location not detected. Set a default location manually if needed.";
+            return;
+        }
+
+        if (config.Latitude == 0 && config.Longitude == 0)
+        {
+            _statusLine = "Home Assistant has no home coordinates set — set a default location manually.";
+            return;
+        }
+
+        var raw = new WeatherHomeLocation(config.Latitude, config.Longitude, config.LocationName);
+        var display = await TryResolveDisplayNameAsync(raw).ConfigureAwait(false);
+        _home = new WeatherHomeLocation(raw.Latitude, raw.Longitude, display);
+
+        var note = string.IsNullOrEmpty(_apiNote) ? "" : $" — {_apiNote}";
+        var overrideNote = string.IsNullOrWhiteSpace(_options.DefaultLocation) ? "" : " (not used while DefaultLocation is set)";
+        _statusLine = $"Home location (from Home Assistant): {display}{overrideNote}{note}";
+        _logger.LogInformation("WeatherAPI home location resolved from Home Assistant: {Display} ({Lat}, {Lon}).", display, raw.Latitude, raw.Longitude);
+    }
+
+    /// <summary>Resolves a place name for the home coordinates; falls back to the coordinate string on any failure.</summary>
+    private async Task<string> TryResolveDisplayNameAsync(WeatherHomeLocation home)
+    {
+        var coords = WeatherQueryResolver.Coordinates(home);
+        try
+        {
+            var query = new StringBuilder()
+                .Append("q=").Append(Uri.EscapeDataString(coords))
+                .Append("&days=1&units=us")
+                .Append("&key=").Append(Uri.EscapeDataString(_options.ApiKey));
+
+            var client = _httpClientFactory.CreateClient("WeatherApi");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var response = await client.GetAsync($"https://api.weatherapi.com/v1/forecast.json?{query}", cts.Token).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                _logger.LogWarning("WeatherAPI key check failed at startup: HTTP {StatusCode} — {Body}", (int)response.StatusCode, Truncate(body, 200));
+                _apiNote = "WeatherAPI call failed: " + ExtractErrorMessage(body);
+                return coords;
+            }
+
+            var json = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+            var result = JsonSerializer.Deserialize<WeatherForecastResponse>(WeatherResponseNormalizer.Normalize(json), DeserializationOptions);
+            var loc = result?.Location;
+            if (loc is null)
+                return coords;
+
+            var parts = new List<string> { loc.Name, loc.Region, loc.Country };
+            var display = string.Join(", ", parts.Where(p => !string.IsNullOrWhiteSpace(p)).ToArray());
+            return display.Length > 0 ? display : coords;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not resolve a display name for the home location; using coordinates.");
+            return coords;
+        }
+    }
+
+    [Description("Get current weather conditions and a multi-day forecast from WeatherAPI.com. Use for questions like 'what's the weather', 'will it rain tomorrow', or 'forecast this weekend'. Returns compact text starting with the place name, then current conditions, any alerts, daily high/low, and optionally the next few hours. Always state which place the result is for — use the place name from the first line of the result — instead of assuming it is the user's home.")]
     public async Task<string> GetWeatherAsync(
-        [Description("Optional location — city name, postal code, or 'lat,lon'. When omitted, uses the configured default location.")] string? location = null,
+        [Description("Optional location — city name, 'lat,lon' coordinates, or postal code (prefer a city name; bare postal codes can geocode to a different country). When omitted, falls back to the configured default location, then the automatic home location.")] string? location = null,
         [Description("Optional number of forecast days (1-14). Defaults to the configured value.")] int? days = null,
         CancellationToken cancellationToken = default)
     {
-        var q = (location ?? _options.DefaultLocation).Trim();
-        if (q.Length == 0)
-            return "No weather location is configured. Ask the user for a city or postal code, and note that a default location can be set in the Lucia dashboard under Plugins > WeatherAPI.com.";
+        var q = WeatherQueryResolver.Resolve(location, _options.DefaultLocation, _options.UseHomeLocation, _home);
+        if (q is null)
+            return "No weather location is available — no place was named and no default or home location is configured. Ask the user for a city name, and note that a default can be set in the Lucia dashboard under Plugins > WeatherAPI.com.";
 
         var forecastDays = Math.Clamp(days ?? _options.DefaultDays, 1, 14);
 
@@ -639,8 +772,10 @@ public sealed class WeatherApiSkill : IWeatherSkill
     }
 }
 
-public sealed class WeatherApiPlugin : ILuciaPlugin
+public sealed class WeatherApiPlugin : ILuciaPlugin, IPluginStatusProvider
 {
+    private IServiceProvider? _services;
+
     public string PluginId => "weather-api";
 
     public string? ConfigSection => "WeatherApi";
@@ -648,7 +783,8 @@ public sealed class WeatherApiPlugin : ILuciaPlugin
     public IReadOnlyList<PluginConfigProperty> ConfigProperties =>
     [
         new("ApiKey", "string", "WeatherAPI.com API key (free at https://www.weatherapi.com/my-account/apikey)", "", IsSensitive: true),
-        new("DefaultLocation", "string", "Default location used when the user doesn't name one — city, postal code, or lat,lon", ""),
+        new("DefaultLocation", "string", "Optional override for the default weather location — city, postal code, or lat,lon. Wins over the automatic home location; leave empty to use your Home Assistant home.", ""),
+        new("UseHomeLocation", "string", "Use the Home Assistant home location as the default when no place is named ('true' or 'false')", "true"),
         new("DefaultDays", "string", "Default number of forecast days (1-14)", "3"),
         new("Units", "string", "Units: 'us' or 'metric'", "us"),
         new("IncludeAqi", "string", "Include air quality index: 'true' or 'false'", "true"),
@@ -657,6 +793,10 @@ public sealed class WeatherApiPlugin : ILuciaPlugin
         new("ShowHourlyPeek", "string", "How many of the next hours to include (0 = off)", "6"),
         new("MaxResponseChars", "string", "Maximum characters returned to the agent (120-4000)", "650"),
     ];
+
+    /// <summary>Live status for the dashboard: where default weather lookups target, and any startup issues.</summary>
+    public string? StatusLine => (_services?.GetService<IWeatherSkill>() as WeatherApiSkill)?.StatusLine
+        ?? "No API key configured — the weather tool is inactive.";
 
     public void ConfigureServices(IHostApplicationBuilder builder)
     {
@@ -669,6 +809,7 @@ public sealed class WeatherApiPlugin : ILuciaPlugin
         {
             ApiKey = apiKey,
             DefaultLocation = (config["WeatherApi:DefaultLocation"] ?? "").Trim(),
+            UseHomeLocation = Bool(config["WeatherApi:UseHomeLocation"], true),
             DefaultDays = BoundedInt(config["WeatherApi:DefaultDays"], fallback: 3, min: 1, max: 14),
             MetricUnits = (config["WeatherApi:Units"] ?? "us").Trim().ToLowerInvariant() == "metric",
             IncludeAqi = Bool(config["WeatherApi:IncludeAqi"], true),
@@ -689,11 +830,13 @@ public sealed class WeatherApiPlugin : ILuciaPlugin
             new WeatherApiSkill(
                 sp.GetRequiredService<IHttpClientFactory>(),
                 options,
-                sp.GetRequiredService<ILoggerFactory>().CreateLogger<WeatherApiSkill>()));
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger<WeatherApiSkill>(),
+                sp.GetService<IHomeAssistantClient>()));
     }
 
     public Task ExecuteAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
+        _services = services;
         var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("WeatherApiPlugin");
         if (services.GetService<IWeatherSkill>() is WeatherApiSkill)
             logger.LogInformation("WeatherAPI plugin active — weather tool registered.");

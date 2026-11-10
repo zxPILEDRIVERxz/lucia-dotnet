@@ -150,6 +150,12 @@ export default function PluginConfigTab() {
               {schema.description && (
                 <p className="mt-0.5 text-xs text-fog">{schema.description}</p>
               )}
+              {schema.status && (
+                <p className="mt-1 flex items-start gap-1.5 text-xs text-fog" title={schema.status}>
+                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-stone/60" aria-hidden="true" />
+                  <span>{schema.status}</span>
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {schema.properties.some(p => p.isSensitive) && (

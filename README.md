@@ -806,7 +806,7 @@ public sealed class SearXngPlugin : ILuciaPlugin
 new SearXngPlugin()
 ```
 
-**WeatherAPI.com Weather** (`plugins/weather-api/`) — Registers `IWeatherSkill` so the GeneralAgent gains a `get_weather` tool for current conditions and multi-day forecasts. Activates when `WeatherApi:ApiKey` (or the `WEATHERAPI_KEY` environment variable) is set; default location, units, forecast days, and AQI/pollen/alerts toggles are editable from the dashboard's **Plugins** page under *WeatherAPI.com*.
+**WeatherAPI.com Weather** (`plugins/weather-api/`) — Registers `IWeatherSkill` so the GeneralAgent gains a `get_weather` tool for current conditions and multi-day forecasts. Activates when `WeatherApi:ApiKey` (or the `WEATHERAPI_KEY` environment variable) is set. When the user doesn't name a place, lookups default to your Home Assistant home coordinates (`UseHomeLocation`, on by default); a configured `DefaultLocation` wins over the automatic home location. The resolved place and any startup issues (unreachable Home Assistant, no coordinates, invalid API key) are shown on the dashboard's **Plugins** page under *WeatherAPI.com*, where units, forecast days, and AQI/pollen/alerts toggles are also editable.
 
 ### Plugin Repository System
 

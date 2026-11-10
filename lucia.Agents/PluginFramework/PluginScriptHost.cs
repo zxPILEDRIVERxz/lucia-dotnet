@@ -1,5 +1,6 @@
 using System.Reflection;
 using lucia.Agents.Abstractions;
+using lucia.HomeAssistant.Services;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
@@ -79,6 +80,7 @@ public static class PluginScriptHost
         var references = new List<Assembly>
         {
             typeof(ILuciaPlugin).Assembly,                                                                  // lucia.Agents
+            typeof(IHomeAssistantClient).Assembly,                                                           // lucia.HomeAssistant
             typeof(BackgroundService).Assembly,                                                             // Microsoft.Extensions.Hosting 
             typeof(Microsoft.Extensions.Hosting.IHostApplicationBuilder).Assembly,                          // Microsoft.Extensions.Hosting.Abstractions
             typeof(Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions).Assembly,   // Microsoft.Extensions.DependencyInjection
@@ -107,6 +109,8 @@ public static class PluginScriptHost
                 "lucia.Agents.Abstractions",
                 "lucia.Agents.Mcp",
                 "lucia.Agents.Models",
+                "lucia.HomeAssistant.Services",
+                "lucia.HomeAssistant.Models",
                 "Microsoft.Extensions.DependencyInjection",
                 "Microsoft.Extensions.Hosting",
                 "Microsoft.Extensions.Logging",
