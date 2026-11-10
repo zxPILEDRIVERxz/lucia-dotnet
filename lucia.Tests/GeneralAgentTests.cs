@@ -200,10 +200,88 @@ public sealed class GeneralAgentTests
         Assert.Contains("get_weather", agent.Instructions);
     }
 
+    [Fact]
+    public void Ctor_WhenToolProvidersRegistered_MergesTools_SkillCardsAndHints()
+    {
+        // Arrange — two providers built the way a plugin script would register them:
+        // one with an instruction hint, one without.
+        var flight = CreateToolProvider(
+            name: "Flight weather",
+            description: "Flyability check for paramotor and ultralight flights",
+            hint: "use the check_flight_conditions tool when asked whether it is safe to fly",
+            toolName: "check_flight_conditions");
+        var homelab = CreateToolProvider(
+            name: "Homelab status",
+            description: "Reports on homelab services and nodes",
+            hint: null,
+            toolName: "get_homelab_status");
+
+        // Act
+        var agent = CreateAgent(
+            A.Fake<IChatClientResolver>(),
+            A.Fake<IAgentDefinitionRepository>(),
+            toolProviders: [flight, homelab]);
+
+        // Assert — tools from every provider are merged in
+        Assert.Equal(
+            ["check_flight_conditions", "get_homelab_status"],
+            agent.Tools.Select(t => t.Name).ToArray());
+
+        // Assert — each provider contributes an agent-card skill entry
+        var skills = agent.GetAgentCard().Skills;
+        Assert.Contains(skills, s => s.Name == "Flight weather" && s.Description == "Flyability check for paramotor and ultralight flights");
+        Assert.Contains(skills, s => s.Name == "Homelab status" && s.Description == "Reports on homelab services and nodes");
+
+        // Assert — the hinted provider's voice hint reaches the instructions;
+        // the unhinted one adds nothing stray.
+        Assert.Contains("use the check_flight_conditions tool when asked whether it is safe to fly", agent.Instructions);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_WhenToolProvidersRegistered_InitializesEachProviderOnce()
+    {
+        // Arrange
+        var provider = CreateToolProvider("Flight weather", "Flyability check", null, "check_flight_conditions");
+        var resolver = A.Fake<IChatClientResolver>();
+        A.CallTo(() => resolver.ResolveAIAgentAsync(A<string?>._, A<CancellationToken>._))
+            .Returns((AIAgent?)A.Fake<AIAgent>());
+
+        var agent = CreateAgent(resolver, A.Fake<IAgentDefinitionRepository>(), toolProviders: [provider]);
+
+        // Act
+        await agent.InitializeAsync();
+
+        // Assert
+        A.CallTo(() => provider.InitializeAsync(A<CancellationToken>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task RefreshConfigAsync_WhenToolProvidersRegistered_ProviderToolsSurviveReload()
+    {
+        // Arrange
+        var tool = AIFunctionFactory.Create(() => "ok", new AIFunctionFactoryOptions { Name = "check_flight_conditions" });
+        var provider = A.Fake<IAgentToolProvider>();
+        A.CallTo(() => provider.GetTools()).Returns(new List<AITool> { tool });
+
+        var resolver = A.Fake<IChatClientResolver>();
+        A.CallTo(() => resolver.ResolveAIAgentAsync(A<string?>._, A<CancellationToken>._))
+            .Returns((AIAgent?)A.Fake<AIAgent>());
+
+        var agent = CreateAgent(resolver, A.Fake<IAgentDefinitionRepository>(), toolProviders: [provider]);
+        await agent.InitializeAsync();
+
+        // Act — the reload path rebuilds the tool list from scratch
+        await agent.RefreshConfigAsync();
+
+        // Assert
+        Assert.Contains(agent.Tools, t => t.Name == "check_flight_conditions");
+    }
+
     private static GeneralAgent CreateAgent(
         IChatClientResolver resolver,
         IAgentDefinitionRepository repository,
-        IWeatherSkill? weatherSkill = null)
+        IWeatherSkill? weatherSkill = null,
+        IEnumerable<IAgentToolProvider>? toolProviders = null)
     {
         return new GeneralAgent(
             resolver,
@@ -211,7 +289,23 @@ public sealed class GeneralAgentTests
             A.Fake<IMcpToolRegistry>(),
             new TracingChatClientFactory(A.Fake<ITraceRepository>(), NullLoggerFactory.Instance),
             NullLoggerFactory.Instance,
-            weatherSkill: weatherSkill);
+            weatherSkill: weatherSkill,
+            toolProviders: toolProviders);
+    }
+
+    private static IAgentToolProvider CreateToolProvider(
+        string name,
+        string description,
+        string? hint,
+        string toolName)
+    {
+        var provider = A.Fake<IAgentToolProvider>();
+        A.CallTo(() => provider.Name).Returns(name);
+        A.CallTo(() => provider.Description).Returns(description);
+        A.CallTo(() => provider.InstructionHint).Returns(hint);
+        A.CallTo(() => provider.GetTools())
+            .Returns(new List<AITool> { AIFunctionFactory.Create(() => "ok", new AIFunctionFactoryOptions { Name = toolName }) });
+        return provider;
     }
 
     private static AgentDefinition CreateDefinition(

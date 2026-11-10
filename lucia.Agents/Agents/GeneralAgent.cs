@@ -20,6 +20,7 @@ public sealed class GeneralAgent : ILuciaAgent
     private readonly IMcpToolRegistry _toolRegistry;
     private readonly IWebSearchSkill? _webSearchSkill;
     private readonly IWeatherSkill? _weatherSkill;
+    private readonly IReadOnlyList<IAgentToolProvider> _toolProviders;
     private readonly TracingChatClientFactory _tracingFactory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<GeneralAgent> _logger;
@@ -45,13 +46,15 @@ public sealed class GeneralAgent : ILuciaAgent
         TracingChatClientFactory tracingFactory,
         ILoggerFactory loggerFactory,
         IWebSearchSkill? webSearchSkill = null,
-        IWeatherSkill? weatherSkill = null)
+        IWeatherSkill? weatherSkill = null,
+        IEnumerable<IAgentToolProvider>? toolProviders = null)
     {
         _clientResolver = clientResolver;
         _definitionRepository = definitionRepository;
         _toolRegistry = toolRegistry;
         _webSearchSkill = webSearchSkill;
         _weatherSkill = weatherSkill;
+        _toolProviders = toolProviders?.ToList() ?? [];
         _tracingFactory = tracingFactory;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<GeneralAgent>();
@@ -61,6 +64,8 @@ public sealed class GeneralAgent : ILuciaAgent
             pluginTools.AddRange(_webSearchSkill.GetTools());
         if (_weatherSkill is not null)
             pluginTools.AddRange(_weatherSkill.GetTools());
+        foreach (var provider in _toolProviders)
+            pluginTools.AddRange(provider.GetTools());
         Tools = pluginTools;
 
         // Create the agent card for registration
@@ -90,11 +95,27 @@ public sealed class GeneralAgent : ILuciaAgent
             });
         }
 
+        foreach (var provider in _toolProviders)
+        {
+            var providerSkillId = ProviderSkillId(provider.Name);
+            if (!skills.Any(s => s.Id == providerSkillId))
+            {
+                skills.Add(new AgentSkill
+                {
+                    Id = providerSkillId,
+                    Name = provider.Name,
+                    Description = provider.Description,
+                });
+            }
+        }
+
         var descriptionParts = new List<string>();
         if (_webSearchSkill is not null)
             descriptionParts.Add("web search");
         if (_weatherSkill is not null)
             descriptionParts.Add("weather forecasts");
+        foreach (var provider in _toolProviders)
+            descriptionParts.Add(provider.Name.ToLowerInvariant());
         var agentDescription = descriptionParts.Count > 0
             ? $"Agent for general knowledge, {string.Join(", ", descriptionParts)}, and personal memory requests in Home Assistant"
             : "Agent for handling #general-knowledge questions and personal memory requests in Home Assistant";
@@ -121,6 +142,10 @@ public sealed class GeneralAgent : ILuciaAgent
         var weatherHint = _weatherSkill is not null
             ? "\n- For current weather conditions or forecasts, use the get_weather tool instead of guessing; base your answer on its data."
             : "";
+        var providerHints = string.Concat(
+            _toolProviders
+                .Where(p => !string.IsNullOrWhiteSpace(p.InstructionHint))
+                .Select(p => $"\n- {p.InstructionHint!.Trim()}"));
 
         var instructions = """
                 You are a specialized general knowledge agent for a Home Assistant platform.
@@ -131,7 +156,7 @@ public sealed class GeneralAgent : ILuciaAgent
                 - If you do not know the answer, simply state in your response "I do not know."
                 - Try to answer the user's request to the best of your ability. Keep your response short
                     enough to be about 6-10 seconds of audio. Roughly about 2 sentences at most.
-                """ + webSearchHint + weatherHint + """
+                """ + webSearchHint + weatherHint + providerHints + """
 
                 ## IMPORTANT
                 * Keep your responses short. Aim for about 2 sentences max.
@@ -167,6 +192,9 @@ public sealed class GeneralAgent : ILuciaAgent
         if (_weatherSkill is not null)
             await _weatherSkill.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
+        foreach (var provider in _toolProviders)
+            await provider.InitializeAsync(cancellationToken).ConfigureAwait(false);
+
         await ApplyDefinitionAsync(cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("General Knowledge initialized successfully");
@@ -195,6 +223,8 @@ public sealed class GeneralAgent : ILuciaAgent
                 pluginTools.AddRange(_webSearchSkill.GetTools());
             if (_weatherSkill is not null)
                 pluginTools.AddRange(_weatherSkill.GetTools());
+            foreach (var provider in _toolProviders)
+                pluginTools.AddRange(provider.GetTools());
             var mcpTools = definition?.Tools.Count > 0
                 ? await _toolRegistry.ResolveToolsAsync(definition.Tools, cancellationToken).ConfigureAwait(false)
                 : [];
@@ -249,5 +279,14 @@ public sealed class GeneralAgent : ILuciaAgent
             .AsBuilder()
             .UseOpenTelemetry()
             .Build();
+    }
+
+    /// <summary>Builds a stable agent-card skill id from a provider name ("Flight weather" → "id_flight_weather").</summary>
+    private static string ProviderSkillId(string name)
+    {
+        var slug = string.Concat(name.Select(c => char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : '_'));
+        while (slug.Contains("__"))
+            slug = slug.Replace("__", "_");
+        return "id_" + slug.Trim('_');
     }
 }
