@@ -111,44 +111,6 @@ public sealed class PluginSystemTests : IDisposable
         Assert.Equal("metamcp", plugin.PluginId);
     }
 
-    // ── Test 1b: PluginScriptHost evaluates weather-api plugin.cs ────
-
-    [Fact]
-    public async Task PluginScriptHost_EvaluatesWeatherApiPlugin_Successfully()
-    {
-        var repoRoot = FindRepoRoot();
-        var weatherSource = Path.Combine(repoRoot, "plugins", "weather-api");
-
-        // Copy plugin files to a temp directory so the test is side-effect-free
-        var tempDir = CreateTempDir();
-        foreach (var file in Directory.EnumerateFiles(weatherSource))
-        {
-            File.Copy(file, Path.Combine(tempDir, Path.GetFileName(file)));
-        }
-
-        var logger = CreateLogger();
-
-        var plugin = await PluginScriptHost.EvaluatePluginAsync(tempDir, logger);
-
-        Assert.NotNull(plugin);
-        Assert.Equal("weather-api", plugin.PluginId);
-        Assert.Equal("WeatherApi", plugin.ConfigSection);
-
-        // Dashboard config surface: API key is present and password-masked
-        var apiKey = Assert.Single(plugin.ConfigProperties, p => p.Name == "ApiKey");
-        Assert.True(apiKey.IsSensitive);
-        Assert.All(plugin.ConfigProperties, p => Assert.Equal("string", p.Type));
-
-        // Automatic home location: gated on by default, with a visible status line for the dashboard
-        var useHome = Assert.Single(plugin.ConfigProperties, p => p.Name == "UseHomeLocation");
-        Assert.Equal("true", useHome.DefaultValue);
-        Assert.Contains(plugin.ConfigProperties, p => p.Name == "DefaultLocation");
-
-        // The plugin surfaces live status (resolved home location / key issues) to the dashboard
-        var statusProvider = Assert.IsAssignableFrom<IPluginStatusProvider>(plugin);
-        Assert.False(string.IsNullOrWhiteSpace(statusProvider.StatusLine));
-    }
-
     // ── Test 2: PluginLoader loads all present plugins ──────────────
 
     [Fact]
@@ -441,7 +403,6 @@ public sealed class PluginSystemTests : IDisposable
         Assert.NotEmpty(manifest.Plugins);
         Assert.Contains(manifest.Plugins, p => p.Id == "metamcp");
         Assert.Contains(manifest.Plugins, p => p.Id == "searxng");
-        Assert.Contains(manifest.Plugins, p => p.Id == "weather-api");
 
         // Each entry must have a relative path
         foreach (var plugin in manifest.Plugins)

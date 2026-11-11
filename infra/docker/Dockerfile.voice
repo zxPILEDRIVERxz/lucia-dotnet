@@ -240,7 +240,7 @@ COPY --from=assets --chown=appuser:appuser /assets/copilot/ ./
 # Copy built SPA dashboard into wwwroot for static file serving
 COPY --from=node-build --chown=appuser:appuser /app/dist ./wwwroot/
 
-# Copy official plugins (MetaMCP, Brave Search, SearXNG, WeatherAPI.com) so env-based tools are registered at startup
+# Copy official plugins (MetaMCP, Brave Search, SearXNG) so env-based tools are registered at startup
 COPY --from=build --chown=appuser:appuser /src/plugins ./plugins
 
 # PluginDirectory default is {AppContext.BaseDirectory}/plugins = /app/plugins

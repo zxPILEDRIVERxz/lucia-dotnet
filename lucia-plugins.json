@@ -22,13 +22,6 @@
       "description": "Web search skill using a SearXNG instance for privacy-respecting search.",
       "version": "1.0.0",
       "path": "plugins/searxng"
-    },
-    {
-      "id": "weather-api",
-      "name": "WeatherAPI.com Weather",
-      "description": "Current conditions and multi-day forecasts via the WeatherAPI.com forecast API.",
-      "version": "1.0.0",
-      "path": "plugins/weather-api"
     }
   ]
 }

@@ -186,7 +186,7 @@ public sealed class GeneralAgentTests
     [Fact]
     public void Ctor_WhenWeatherSkillRegistered_ExposesWeatherToolAndInstructionHint()
     {
-        // Arrange — a real tool built the same way plugins/weather-api/plugin.cs does
+        // Arrange — a real tool built the same way an IWeatherSkill plugin exposes get_weather
         var weatherSkill = A.Fake<IWeatherSkill>();
         var tool = AIFunctionFactory.Create(() => "sunny", new AIFunctionFactoryOptions { Name = "get_weather" });
         A.CallTo(() => weatherSkill.GetTools()).Returns(new List<AITool> { tool });
