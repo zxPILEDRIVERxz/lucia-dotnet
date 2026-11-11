@@ -44,6 +44,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "lucia.serviceAccountName" . }}
+      {{- include "lucia.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.lucia.affinity }}
       affinity:
         {{- toYaml .Values.lucia.affinity | nindent 8 }}
@@ -101,6 +102,33 @@ spec:
               done
               echo "PostgreSQL failed to become ready"
               exit 1
+        {{- if .Values.plugins.enabled }}
+        # Seed the persistent plugins volume with the bundled plugins baked into the image.
+        # No-clobber (-n): only adds plugin folders missing from the volume (fresh or grown
+        # PVCs pick up new bundled plugins); never overwrites repository-installed plugins.
+        # Mounts the claim at a separate path so the image's own /app/plugins stays visible
+        # as the copy source. Uses the app image so the seed runs with identical content/user.
+        - name: seed-plugins
+          image: "{{ .Values.lucia.image.repository }}:{{ .Values.lucia.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.lucia.image.pullPolicy }}
+          command:
+            - 'sh'
+            - '-c'
+            - |
+              echo "Seeding bundled plugins into persistent volume (no-clobber)..."
+              mkdir -p /plugins-data
+              cp -rn /app/plugins/. /plugins-data/
+              echo "Seed complete. Contents:"
+              ls /plugins-data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: plugins
+              mountPath: /plugins-data
+        {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           {{- with .Values.lucia.securityContext }}
@@ -166,6 +194,12 @@ spec:
               mountPath: /etc/ssl/certs
               readOnly: true
             {{- end }}
+            {{- if .Values.plugins.enabled }}
+            # Persistent plugin storage (bundled + repository-installed plugins),
+            # seeded at startup by the seed-plugins init container (no-clobber).
+            - name: plugins
+              mountPath: /app/plugins
+            {{- end }}
 
       # Volumes for pod
       volumes:
@@ -179,6 +213,13 @@ spec:
         - name: tls-certs
           secret:
             secretName: {{ .Values.lucia.tlsCerts }}
+        {{- end }}
+        {{- if .Values.plugins.enabled }}
+        # Persistent plugin storage. NEVER delete this PVC on upgrades — installed
+        # plugins live here; bundled plugins are re-seeded by the init container.
+        - name: plugins
+          persistentVolumeClaim:
+            claimName: {{ .Values.plugins.existingClaim | default (printf "%s-plugins" (include "lucia.fullname" .)) }}
         {{- end }}
 
       # Termination grace period for graceful shutdown

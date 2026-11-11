@@ -1,0 +1,22 @@
+# Persistent storage for /app/plugins (bundled + repository-installed plugins).
+# The seed-plugins init container in 04-deployment.yaml copies any bundled plugins
+# missing from this volume on every pod start (no-clobber: installed plugins are
+# never overwritten).
+# NEVER delete this PVC on upgrades — installed plugins live here.
+# If you ever run more than one lucia replica, change accessModes to ReadWriteMany
+# and use a RWX-capable storageClassName.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lucia-plugins
+  namespace: lucia
+  labels:
+    app.kubernetes.io/name: lucia
+    app.kubernetes.io/component: plugins
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 1Gi

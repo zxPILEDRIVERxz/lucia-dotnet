@@ -128,6 +128,24 @@ lucia:
   # Environment variables (from ConfigMap and Secrets)
   env: {}
 
+## Plugin persistence (/app/plugins).
+## Bundled plugins ship baked into the image; repository-installed plugins (dashboard →
+## Plugins) are written to /app/plugins and must survive pod recreation, so the directory
+## is backed by a PVC. A seed init container copies any bundled plugins missing from the
+## volume on every pod start (no-clobber: installed plugins are never overwritten, and
+## fresh/grown volumes pick up new bundled plugins).
+## NEVER delete the claim on upgrades — installed plugins live there.
+plugins:
+  enabled: true
+  # Existing PVC to mount at /app/plugins (e.g. one created manually). When set, no PVC
+  # is created by this chart.
+  existingClaim: ""
+  # Used only when existingClaim is empty.
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  # RWX-capable class required for replicaCount > 1 (empty = cluster default).
+  storageClass: ""
+
 ## Redis Configuration
 redis:
   # Enable embedded Redis
@@ -253,12 +271,24 @@ postgres:
   enabled: false
   host: ""
   port: 5432
-  # Existing Secret containing three complete Npgsql connection strings.
+  # Existing Secret with credentials. Two layouts are supported (see the
+  # lucia.postgres.env helper):
+  # - Standard CloudNativePG app secret (host/port/username/password keys; one
+  #   shared `uri` for the cluster) — default: the chart expands the parts into
+  #   a per-database Npgsql connection string at pod start.
+  # - One complete Npgsql connection string per database in the Secret: set
+  #   connectionStringKeys.<db> to the key holding that database's string.
   existingSecret: ""
-  connectionStringKeys:
+  # Only used when non-empty; empty (default) selects the standard CNPG layout above.
+  connectionStringKeys: {}
+  # Database names for the per-database Npgsql strings (standard CNPG layout only).
+  databases:
     luciaconfig: "luciaconfig"
     luciatraces: "luciatraces"
     luciatasks: "luciatasks"
+  # TLS settings for the Npgsql strings (standard CNPG layout only).
+  sslMode: Require
+  trustServerCertificate: "true"
 
 ## LLM Configuration (for ConfigMap and Secrets)
 llm:

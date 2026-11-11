@@ -99,20 +99,70 @@ PostgreSQL host and port for the readiness check: the bundled server, or the ext
 
 {{/*
 PostgreSQL connection strings for every pod using the shared data provider.
-Read from the bundled server's Secret, or from the external existingSecret.
+
+External (postgres.enabled=true, secret in postgres.existingSecret):
+- If postgres.connectionStringKeys is set, each <db> key names an entry in the
+  Secret holding that database's complete Npgsql connection string.
+- Otherwise the standard CloudNativePG app-secret layout is assumed
+  (host/port/username/password keys). The CNPG_POSTGRES_* parts are declared
+  first because Kubernetes only expands $(VAR) from earlier-defined env; each
+  ConnectionStrings__<db> then builds its Npgsql string with a per-database
+  postgres.databases.<db> name.
+Bundled (postgres.enabled=false): the <release>-postgres Secret holds one
+complete connection string per database, keyed by database name.
 */}}
 {{- define "lucia.postgres.env" -}}
+{{- if .Values.postgres.enabled }}
+{{- $secret := required "postgres.existingSecret is required when postgres.enabled is true" .Values.postgres.existingSecret }}
+{{- if .Values.postgres.connectionStringKeys }}
 {{- range $database := list "luciaconfig" "luciatraces" "luciatasks" }}
 - name: ConnectionStrings__{{ $database }}
   valueFrom:
     secretKeyRef:
-      {{- if $.Values.postgres.enabled }}
-      name: {{ $.Values.postgres.existingSecret | quote }}
+      name: {{ $secret | quote }}
       key: {{ required (printf "postgres.connectionStringKeys.%s is required" $database) (index $.Values.postgres.connectionStringKeys $database) | quote }}
-      {{- else }}
-      name: {{ printf "%s-postgres" (include "lucia.fullname" $) | quote }}
+{{- end }}
+{{- else }}
+- name: CNPG_POSTGRES_HOST
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret | quote }}
+      key: host
+- name: CNPG_POSTGRES_PORT
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret | quote }}
+      key: port
+- name: CNPG_POSTGRES_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret | quote }}
+      key: username
+- name: CNPG_POSTGRES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret | quote }}
+      key: password
+{{- range $database := list "luciaconfig" "luciatraces" "luciatasks" }}
+- name: ConnectionStrings__{{ $database }}
+  value: >-
+    Host=$(CNPG_POSTGRES_HOST);
+    Port=$(CNPG_POSTGRES_PORT);
+    Database={{ required (printf "postgres.databases.%s is required" $database) (index $.Values.postgres.databases $database) | quote }};
+    Username=$(CNPG_POSTGRES_USERNAME);
+    Password=$(CNPG_POSTGRES_PASSWORD);
+    SSL Mode={{ $.Values.postgres.sslMode | default "Require" }};
+    Trust Server Certificate={{ $.Values.postgres.trustServerCertificate | default "true" }};
+{{- end }}
+{{- end }}
+{{- else }}
+{{- range $database := list "luciaconfig" "luciatraces" "luciatasks" }}
+- name: ConnectionStrings__{{ $database }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ printf "%s-postgres" (include "lucia.fullname" .) | quote }}
       key: {{ $database | quote }}
-      {{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 

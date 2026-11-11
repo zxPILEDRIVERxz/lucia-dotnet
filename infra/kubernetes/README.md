@@ -45,6 +45,7 @@ kubectl apply -f 04-deployment.yaml
 kubectl apply -f 05-ingress.yaml
 kubectl apply -f 06-rbac.yaml
 kubectl apply -f 07-postgres.yaml
+kubectl apply -f 09-plugins-pvc.yaml
 
 # Verify installation
 kubectl get all -n lucia
@@ -79,6 +80,7 @@ infra/kubernetes/
 │   ├── 05-ingress.yaml            # Ingress configuration
 │   ├── 06-rbac.yaml               # ServiceAccount + RBAC + PDB
 │   ├── 07-postgres.yaml           # PostgreSQL StatefulSet + Service + init SQL
+│   ├── 09-plugins-pvc.yaml        # PVC backing /app/plugins (bundled + installed plugins)
 │   ├── kustomization.yaml         # Kustomize configuration
 │   └── README.md                  # Manifests documentation
 │
@@ -472,6 +474,18 @@ helm install lucia ./helm \
 helm install lucia ./helm \
   --set networkPolicy.enabled=true
 ```
+
+## Plugin Persistence (/app/plugins)
+
+Bundled plugins ship baked into the image; repository-installed plugins (dashboard → Plugins) are written to `/app/plugins` and must survive pod recreation. Both deployment methods back that directory with a persistent volume:
+
+- **Helm:** `plugins.enabled` (default `true`) mounts a PVC at `/app/plugins`. If `plugins.existingClaim` is set it is used; otherwise the chart creates `<release>-plugins` using `plugins.size` / `plugins.storageClass` (see `templates/pvc.yaml`).
+- **Raw manifests:** `09-plugins-pvc.yaml` creates the `lucia-plugins` PVC, mounted by `04-deployment.yaml`.
+
+A `seed-plugins` init container (same app image) runs on every pod start and copies any bundled plugins missing from the volume using a no-clobber copy (`cp -rn`). Fresh or grown volumes therefore pick up all bundled plugins — including new ones added in later images — while repository-installed plugins are never overwritten.
+
+> **⚠️ NEVER delete the plugins PVC on upgrades** — repository-installed plugins live there. Deleting it loses every installed plugin (bundled ones are re-seeded automatically on next pod start).
+> The chart default is single-replica; if you ever run more than one lucia replica, the claim must be `ReadWriteMany` on a RWX-capable storage class.
 
 ## Cleanup
 
