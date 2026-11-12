@@ -160,7 +160,7 @@ complete connection string per database, keyed by database name.
 - name: ConnectionStrings__{{ $database }}
   valueFrom:
     secretKeyRef:
-      name: {{ printf "%s-postgres" (include "lucia.fullname" .) | quote }}
+      name: {{ printf "%s-postgres" (include "lucia.fullname" $) | quote }}
       key: {{ $database | quote }}
 {{- end }}
 {{- end }}
