@@ -9,11 +9,13 @@ using lucia.Agents.Abstractions;
 using lucia.Agents.Configuration;
 using lucia.Agents.Configuration.UserConfiguration;
 using lucia.Agents.GitHubCopilot;
+using lucia.Agents.Integration;
 using lucia.Agents.Models;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using OllamaSharp;
 using OpenAI;
@@ -69,6 +71,12 @@ public sealed class ModelProviderResolver : IModelProviderResolver
                 "GitHub Copilot providers produce AIAgent directly. Use CreateAIAgentAsync() instead of CreateClient()."),
             _ => throw new NotSupportedException($"Provider type '{provider.ProviderType}' is not supported")
         };
+
+        // Innermost wrapper: retry empty "stop" completions on tool-result turns (observed on
+        // OpenAI-compatible Gemini endpoints). Below telemetry so both attempts appear in traces.
+        var retryLogger = _serviceProvider.GetService<ILogger<EmptyCompletionRetryChatClient>>()
+            ?? NullLogger<EmptyCompletionRetryChatClient>.Instance;
+        inner = new EmptyCompletionRetryChatClient(inner, retryLogger);
 
         // One policy and one telemetry wrapper for every provider. SDK payload logging also contains content.
         var includeContent = IncludeModelContent;
