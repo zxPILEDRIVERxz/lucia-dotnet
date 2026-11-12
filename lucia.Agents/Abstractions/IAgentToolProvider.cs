@@ -3,30 +3,34 @@ using Microsoft.Extensions.AI;
 namespace lucia.Agents.Abstractions;
 
 /// <summary>
-/// A generic capability a plugin can provide to agents: a set of AI tools plus the
-/// metadata an agent needs to describe and use them. Agents that accept tool providers
-/// merge in every registered implementation, so plugins can expose voice-tuned tools
-/// without any core change per capability domain. Register implementations in a plugin's
-/// <c>ConfigureServices</c>, e.g. <c>AddSingleton&lt;IAgentToolProvider&gt;(sp =&gt; new MySkill(...))</c>.
+/// A tool capability that a plugin contributes to agents without a core change.
+/// Register any number of providers with
+/// <c>builder.Services.AddSingleton&lt;IAgentToolProvider&gt;(...)</c> in
+/// <see cref="ILuciaPlugin.ConfigureServices"/>. The general agent merges every
+/// provider's tools, lists each provider as a skill on its agent card, and appends
+/// non-null instruction hints to its instructions. Custom agents can select
+/// individual tools from the dashboard alongside MCP tools.
 /// </summary>
 public interface IAgentToolProvider
 {
-    /// <summary>Short display name for the capability, shown on the agent card (e.g. "Flight weather").</summary>
+    /// <summary>
+    /// Unique, stable provider name shown on agent cards and in the tool picker.
+    /// Saved custom agents reference this name. Renaming it breaks those references.
+    /// </summary>
     string Name { get; }
 
-    /// <summary>What this capability does; used for the agent-card skill entry and agent description.</summary>
+    /// <summary>What the capability does. Shown on the agent card.</summary>
     string Description { get; }
 
-    /// <summary>
-    /// Optional plain-text voice hint appended to the agent's instructions (e.g.
-    /// "use the check_flight_conditions tool when asked whether it is safe to fly").
-    /// The applying agent adds its own list formatting; return null for none.
-    /// </summary>
-    string? InstructionHint { get; }
+    /// <summary>Optional hint appended to instructions when the agent uses this provider's tools.</summary>
+    string? InstructionHint => null;
 
-    /// <summary>Returns the AI tools exposed by this capability.</summary>
+    /// <summary>Returns the AI tools exposed by this provider.</summary>
     IList<AITool> GetTools();
 
-    /// <summary>Performs one-time initialization (e.g. connectivity check, logging).</summary>
-    Task InitializeAsync(CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Performs one-time initialization shared by all agents. On failure, tools are
+    /// unavailable until host restart and the dashboard shows the initialization error.
+    /// </summary>
+    Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
