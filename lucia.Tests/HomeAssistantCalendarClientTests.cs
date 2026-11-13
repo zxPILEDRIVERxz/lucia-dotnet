@@ -101,8 +101,10 @@ public class HomeAssistantCalendarClientTests
         var root = doc.RootElement;
         Assert.Equal("calendar.local", root.GetProperty("entity_id").GetString());
         Assert.Equal("Dentist", root.GetProperty("summary").GetString());
-        Assert.Equal("2026-11-25T14:00:00+00:00", root.GetProperty("start_datetime").GetString());
-        Assert.Equal("2026-11-25T15:00:00+00:00", root.GetProperty("end_datetime").GetString());
+        Assert.Equal("2026-11-25T14:00:00+00:00", root.GetProperty("start_date_time").GetString());
+        Assert.Equal("2026-11-25T15:00:00+00:00", root.GetProperty("end_date_time").GetString());
+        // HA 2026.11 renamed the service args; the old keys are rejected as unknown fields.
+        Assert.False(root.TryGetProperty("start_datetime", out _));
         Assert.Equal("bring insurance card", root.GetProperty("description").GetString());
         Assert.Equal("Dental clinic", root.GetProperty("location").GetString());
         Assert.False(root.TryGetProperty("start_date", out _));
@@ -130,8 +132,8 @@ public class HomeAssistantCalendarClientTests
         var root = doc.RootElement;
         Assert.Equal("2026-12-01", root.GetProperty("start_date").GetString());
         Assert.Equal("2026-12-08", root.GetProperty("end_date").GetString());
-        Assert.False(root.TryGetProperty("start_datetime", out _));
-        Assert.False(root.TryGetProperty("end_datetime", out _));
+        Assert.False(root.TryGetProperty("start_date_time", out _));
+        Assert.False(root.TryGetProperty("end_date_time", out _));
         // Optional fields are omitted entirely when null.
         Assert.False(root.TryGetProperty("description", out _));
         Assert.False(root.TryGetProperty("location", out _));
@@ -158,19 +160,42 @@ public class HomeAssistantCalendarClientTests
     }
 
     [Fact]
-    public async Task CreateCalendarEvent_HttpError_Throws()
+    public async Task CreateCalendarEvent_HttpError_ThrowsWithStatusAndHaBody()
     {
         var client = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError)
         {
             Content = new StringContent("""{"message":"Service not found"}""")
         });
 
-        await Assert.ThrowsAsync<HttpRequestException>(() =>
+        var ex = await Assert.ThrowsAsync<HttpRequestException>(() =>
             client.CreateCalendarEventAsync(
                 "calendar.local",
                 "Dentist",
                 new CalendarDateTime { DateTime = "2026-11-25T14:00:00+00:00" },
                 new CalendarDateTime { DateTime = "2026-11-25T15:00:00+00:00" }));
+
+        Assert.Contains("500", ex.Message);
+        Assert.Contains("Service not found", ex.Message);
+    }
+
+    [Fact]
+    public async Task CreateCalendarEvent_HttpError_BareTextBody_IsSurfaced()
+    {
+        // HA 2026.11 renders REST service schema failures as a bare text body.
+        var client = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("400: Bad Request")
+        });
+
+        var ex = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            client.CreateCalendarEventAsync(
+                "calendar.local",
+                "Dentist",
+                new CalendarDateTime { DateTime = "2026-11-25T14:00:00+00:00" },
+                new CalendarDateTime { DateTime = "2026-11-25T15:00:00+00:00" }));
+
+        Assert.Contains("400", ex.Message);
+        Assert.Contains("400: Bad Request", ex.Message);
     }
 
     // ── Delete (WebSocket) ──────────────────────────────────────────
@@ -229,8 +254,9 @@ public class HomeAssistantCalendarClientTests
 
         var evt = command.GetProperty("event");
         Assert.Equal("Dentist (moved)", evt.GetProperty("summary").GetString());
-        Assert.Equal("2026-11-25T16:00:00+00:00", evt.GetProperty("start").GetProperty("dateTime").GetString());
-        Assert.Equal("2026-11-25T17:00:00+00:00", evt.GetProperty("end").GetProperty("dateTime").GetString());
+        // The WebSocket API takes flat date/datetime strings, not nested dicts.
+        Assert.Equal("2026-11-25T16:00:00+00:00", evt.GetProperty("start").GetString());
+        Assert.Equal("2026-11-25T17:00:00+00:00", evt.GetProperty("end").GetString());
         Assert.Equal("rescheduled", evt.GetProperty("description").GetString());
         Assert.False(evt.TryGetProperty("location", out _));
     }
@@ -250,8 +276,8 @@ public class HomeAssistantCalendarClientTests
 
         var command = JsonDocument.Parse(server.ReceivedCommands.Single()).RootElement;
         var evt = command.GetProperty("event");
-        Assert.Equal("2026-12-01", evt.GetProperty("start").GetProperty("date").GetString());
-        Assert.Equal("2026-12-10", evt.GetProperty("end").GetProperty("date").GetString());
+        Assert.Equal("2026-12-01", evt.GetProperty("start").GetString());
+        Assert.Equal("2026-12-10", evt.GetProperty("end").GetString());
     }
 
     [Fact]

@@ -133,7 +133,7 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         try
         {
             var response = await _httpClient.PostAsync(path, content, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            await ThrowIfNotSuccessful(response, path, "POST", cancellationToken);
             return await response.Content.ReadAsStringAsync(cancellationToken);
         }
         catch (HttpRequestException ex)
@@ -297,8 +297,9 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         }
         else
         {
-            payload["start_datetime"] = start.DateTime;
-            payload["end_datetime"] = end.DateTime;
+            // HA 2026.11 renamed these service args from start_datetime/end_datetime.
+            payload["start_date_time"] = start.DateTime;
+            payload["end_date_time"] = end.DateTime;
         }
         if (!string.IsNullOrEmpty(description))
             payload["description"] = description;
@@ -340,8 +341,9 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         var evt = new Dictionary<string, object?>
         {
             ["summary"] = summary,
-            ["start"] = ToApiDate(start),
-            ["end"] = ToApiDate(end)
+            // The WebSocket API takes flat date/datetime strings, not nested dicts.
+            ["start"] = start.Date ?? start.DateTime,
+            ["end"] = end.Date ?? end.DateTime
         };
         if (!string.IsNullOrEmpty(description))
             evt["description"] = description;
@@ -367,13 +369,6 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
                 "Start and end must both be all-day dates or both be datetimes.",
                 nameof(start));
         }
-    }
-
-    private static Dictionary<string, string> ToApiDate(CalendarDateTime value)
-    {
-        return value.Date is not null
-            ? new Dictionary<string, string> { ["date"] = value.Date! }
-            : new Dictionary<string, string> { ["dateTime"] = value.DateTime! };
     }
 
     // ── Shopping List ───────────────────────────────────────────────
@@ -704,6 +699,30 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
 
     // ── Private helpers ─────────────────────────────────────────────
 
+    /// <summary>
+    /// Throws an <see cref="HttpRequestException"/> carrying Home Assistant's response body
+    /// so API errors are diagnosable from logs alone.
+    /// </summary>
+    private static async Task ThrowIfNotSuccessful(
+        HttpResponseMessage response,
+        string path,
+        string method,
+        CancellationToken cancellationToken)
+    {
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var body = (await response.Content.ReadAsStringAsync(cancellationToken)).Trim();
+        const int MaxBodyLength = 500;
+        if (body.Length > MaxBodyLength)
+            body = body[..MaxBodyLength] + "…";
+
+        throw new HttpRequestException(
+            body.Length > 0
+                ? $"{method} {path} failed with {(int)response.StatusCode}: {body}"
+                : $"{method} {path} failed with {(int)response.StatusCode}");
+    }
+
     private async Task<T> GetAsync<T>(string path, CancellationToken cancellationToken)
     {
         EnsureHttpClientConfigured();
@@ -758,7 +777,7 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         try
         {
             var response = await _httpClient.PostAsync(path, content, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            await ThrowIfNotSuccessful(response, path, "POST", cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<T>(HomeAssistantJsonOptions.Default, cancellationToken)
                 ?? throw new InvalidOperationException("Failed to deserialize response");
@@ -787,7 +806,7 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         try
         {
             var response = await _httpClient.PostAsync(path, content, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            await ThrowIfNotSuccessful(response, path, "POST", cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<T[]>(HomeAssistantJsonOptions.Default, cancellationToken)
                 ?? [];
