@@ -2,8 +2,11 @@
 Persistent Volume Claim for plugin storage (/app/plugins).
 
 Only rendered when plugins are enabled AND no existing claim is supplied.
-Bundled plugins are seeded into the volume by the seed-plugins init container
-on every pod start (no-clobber); repository-installed plugins persist in it.
+The seed-plugins init container syncs the image's bundled plugins into the
+volume on every pod start using per-plugin .lucia-seeded markers: marked
+(bundled) dirs are replaced from the current image each start so plugin code
+updates and corruption repair flow through; unmarked (repository/store- or
+user-installed) dirs are never touched.
 NEVER delete this PVC on upgrades — installed plugins live there.
 With more than one replica the claim must be ReadWriteMany (set plugins.accessMode
 and a RWX-capable plugins.storageClass).
