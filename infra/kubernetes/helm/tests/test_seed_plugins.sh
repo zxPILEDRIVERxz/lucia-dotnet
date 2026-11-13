@@ -128,11 +128,12 @@ assert "T7 idempotent: file tree unchanged (modulo marker timestamps)" \
 
 # ── T8: stale staging leftovers are cleared, not trusted ─────────
 
-mkdir -p "$T/.searxng.lucia-seed-tmp"
-printf 'stale junk\n' >"$T/.searxng.lucia-seed-tmp/plugin.cs"
+STALE_STAGING="$T/.searxng.${HOSTNAME:-local}.lucia-seed-tmp"
+mkdir -p "$STALE_STAGING"
+printf 'stale junk\n' >"$STALE_STAGING/plugin.cs"
 run_seed "$WORK/src" "$T"
 assert "T8 staging: exit 0" test $? -eq 0
-assert "T8 staging: leftover staging dir gone" test ! -e "$T/.searxng.lucia-seed-tmp"
+assert "T8 staging: leftover staging dir gone" test ! -e "$STALE_STAGING"
 assert "T8 staging: real content wins" grep -q "v2 (updated)" "$T/searxng/plugin.cs"
 
 # ── T9: source == target is a hard error (misconfiguration) ──────

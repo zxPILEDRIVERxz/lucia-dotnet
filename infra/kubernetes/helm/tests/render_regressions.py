@@ -113,4 +113,28 @@ http_nodeport = render("lucia.service.type=NodePort", "lucia.service.nodePort=31
 assert http_nodeport.returncode == 0, http_nodeport.stderr
 assert "nodePort: 31300" in http_nodeport.stdout
 
-print("Helm render regressions passed: defaults, external secrets, invalid values, and the Wyoming voice port.")
+# Plugin seeding: the init container must run the seed script baked into the
+# image (marker-based sync), not an inline no-clobber copy that can never
+# update or repair an already-seeded bundled plugin.
+default_deployment = next(document for document in default.stdout.split("---") if "\nkind: Deployment\n" in document)
+assert "- name: seed-plugins" in default_deployment
+assert "/usr/local/bin/seed-plugins.sh" in default_deployment
+assert "cp -rn" not in default.stdout
+
+plugins_disabled = render("plugins.enabled=false")
+assert plugins_disabled.returncode == 0, plugins_disabled.stderr
+disabled_deployment = next(document for document in plugins_disabled.stdout.split("---") if "\nkind: Deployment\n" in document)
+assert "- name: seed-plugins" not in disabled_deployment
+
+# Rollout strategy vs the ReadWriteOnce plugins PVC: a single-replica pod can
+# never attach the volume while the previous pod still holds it, so
+# maxUnavailable: 0 deadlocks every upgrade (new pod waits for detach, old pod
+# is held until the new one is ready). Single replica must allow the old pod to
+# terminate first; multi-replica (RWX) can keep zero downtime.
+assert "maxUnavailable: 1" in default_deployment
+multi = render("lucia.replicaCount=2")
+assert multi.returncode == 0, multi.stderr
+multi_deployment = next(document for document in multi.stdout.split("---") if "\nkind: Deployment\n" in document)
+assert "maxUnavailable: 0" in multi_deployment
+
+print("Helm render regressions passed: defaults, external secrets, invalid values, the Wyoming voice port, and plugin seeding.")

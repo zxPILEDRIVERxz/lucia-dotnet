@@ -23,7 +23,12 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0
+      # Single-replica pods cannot attach the ReadWriteOnce plugins PVC while
+      # the previous pod still holds it, so maxUnavailable: 0 deadlocks every
+      # upgrade (new pod waits for the detach; the old pod is held until the
+      # new one is ready). Allow the old pod to terminate first when a single
+      # replica runs; multi-replica (RWX) keeps zero downtime.
+      maxUnavailable: {{ if gt (int .Values.lucia.replicaCount) 1 }}0{{ else }}1{{ end }}
   selector:
     matchLabels:
       {{- include "lucia.selectorLabels" . | nindent 6 }}
@@ -103,23 +108,19 @@ spec:
               echo "PostgreSQL failed to become ready"
               exit 1
         {{- if .Values.plugins.enabled }}
-        # Seed the persistent plugins volume with the bundled plugins baked into the image.
-        # No-clobber (-n): only adds plugin folders missing from the volume (fresh or grown
-        # PVCs pick up new bundled plugins); never overwrites repository-installed plugins.
-        # Mounts the claim at a separate path so the image's own /app/plugins stays visible
-        # as the copy source. Uses the app image so the seed runs with identical content/user.
+        # Seed the persistent plugins volume from the bundled plugins baked into
+        # the image. The script (baked into the image at /usr/local/bin) uses a
+        # per-plugin .lucia-seeded marker: marked dirs are replaced wholesale on
+        # every pod start — so bundled plugin code updates with image upgrades
+        # and corrupted copies self-heal — while unmarked dirs (repository- or
+        # store-installed plugins) are never touched. Mounts the claim at a
+        # separate path so the image's own /app/plugins stays visible as the
+        # copy source. Runs with the app image for identical content/user.
         - name: seed-plugins
           image: "{{ .Values.lucia.image.repository }}:{{ .Values.lucia.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.lucia.image.pullPolicy }}
           command:
-            - 'sh'
-            - '-c'
-            - |
-              echo "Seeding bundled plugins into persistent volume (no-clobber)..."
-              mkdir -p /plugins-data
-              cp -rn /app/plugins/. /plugins-data/
-              echo "Seed complete. Contents:"
-              ls /plugins-data
+            - /usr/local/bin/seed-plugins.sh
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

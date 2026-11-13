@@ -19,7 +19,11 @@
 #
 # Replacement is done via a staging copy plus atomic rename within TARGET_DIR,
 # so an interrupted run always leaves either the previous complete copy or a
-# missing directory — never a partial one at the final path.
+# missing directory — never a partial one at the final path. Known edge: a pod
+# killed mid-seed can leave its hidden .<name>.<host>.lucia-seed-tmp directory
+# behind; the next seed from that same host clears it, leftovers from other
+# hosts are inert dot-directories — delete by hand if a plugin scan ever picks
+# one up.
 
 set -eu
 
@@ -62,7 +66,9 @@ for src in "$SRC_ABS"/*/; do
     continue
   fi
 
-  staging="$TGT_ABS/.$name.lucia-seed-tmp"
+  # Staging name includes the host (pod) name so concurrent seeders on a shared
+  # ReadWriteMany volume never clobber each other's in-flight copies.
+  staging="$TGT_ABS/.$name.${HOSTNAME:-local}.lucia-seed-tmp"
   rm -rf "$staging"
   cp -r "${src}." "$staging"
   if [ ! -f "$staging/plugin.cs" ]; then
