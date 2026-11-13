@@ -137,4 +137,16 @@ assert multi.returncode == 0, multi.stderr
 multi_deployment = next(document for document in multi.stdout.split("---") if "\nkind: Deployment\n" in document)
 assert "maxUnavailable: 0" in multi_deployment
 
+# The tmp scratch volume must be sized above the model-download staging peak:
+# ModelDownloader writes the archive AND its extracted contents to
+# /tmp/lucia-wyoming-models simultaneously (e.g. parakeet 0.6B v3 = 465MB
+# archive + 641MB extracted ≈ 1.06GiB). A limit below that peak lets the
+# kubelet evict the pod mid-download on any startup where a preferred model
+# is not baked into the image (exit 137, "EmptyDir volume tmp exceeds limit").
+assert "sizeLimit: 4Gi" in default_deployment
+big_tmp = render("lucia.tmpSizeLimit=8Gi")
+assert big_tmp.returncode == 0, big_tmp.stderr
+big_tmp_deployment = next(document for document in big_tmp.stdout.split("---") if "\nkind: Deployment\n" in document)
+assert "sizeLimit: 8Gi" in big_tmp_deployment
+
 print("Helm render regressions passed: defaults, external secrets, invalid values, the Wyoming voice port, and plugin seeding.")

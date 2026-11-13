@@ -29,6 +29,15 @@ lucia:
   # Must be 1 — multi-instance is not yet supported and causes state desync.
   replicaCount: 1
 
+  # Size limit of the /tmp scratch volume (emptyDir). It must cover the
+  # model-download staging peak: the runtime Wyoming downloader writes the
+  # model archive AND its extracted contents to /tmp/lucia-wyoming-models at
+  # the same time whenever a preferred model is not baked into the image
+  # (e.g. parakeet 0.6B v3 ≈ 465MB + 641MB ≈ 1.06GiB). A limit below that
+  # peak makes the kubelet evict the pod mid-download (exit 137). 4Gi leaves
+  # headroom for larger catalog models.
+  tmpSizeLimit: 4Gi
+
   # Service configuration
   service:
     # Service type: ClusterIP, NodePort, LoadBalancer

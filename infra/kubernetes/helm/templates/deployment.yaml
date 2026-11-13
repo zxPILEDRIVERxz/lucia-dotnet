@@ -215,7 +215,9 @@ spec:
       volumes:
         - name: tmp
           emptyDir:
-            sizeLimit: 1Gi
+            # Must stay above the model-download staging peak (archive +
+            # extracted data coexist briefly in /tmp); see lucia.tmpSizeLimit.
+            sizeLimit: {{ .Values.lucia.tmpSizeLimit }}
         - name: cache
           emptyDir:
             sizeLimit: 500Mi
