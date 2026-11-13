@@ -374,9 +374,12 @@ public class HomeAssistantCalendarClientTests
 
         var evt = command.GetProperty("event");
         Assert.Equal("Dentist (moved)", evt.GetProperty("summary").GetString());
-        // The WebSocket API takes flat date/datetime strings, not nested dicts.
-        Assert.Equal("2026-11-25T16:00:00+00:00", evt.GetProperty("start").GetString());
-        Assert.Equal("2026-11-25T17:00:00+00:00", evt.GetProperty("end").GetString());
+        // The WebSocket API takes flat iCalendar VEVENT fields: dtstart/dtend,
+        // not start/end (HA 2026.11 rejects the latter as invalid_format).
+        Assert.Equal("2026-11-25T16:00:00+00:00", evt.GetProperty("dtstart").GetString());
+        Assert.Equal("2026-11-25T17:00:00+00:00", evt.GetProperty("dtend").GetString());
+        Assert.False(evt.TryGetProperty("start", out _));
+        Assert.False(evt.TryGetProperty("end", out _));
         Assert.Equal("rescheduled", evt.GetProperty("description").GetString());
         Assert.False(evt.TryGetProperty("location", out _));
     }
@@ -396,8 +399,8 @@ public class HomeAssistantCalendarClientTests
 
         var command = JsonDocument.Parse(server.ReceivedCommands.Single()).RootElement;
         var evt = command.GetProperty("event");
-        Assert.Equal("2026-12-01", evt.GetProperty("start").GetString());
-        Assert.Equal("2026-12-10", evt.GetProperty("end").GetString());
+        Assert.Equal("2026-12-01", evt.GetProperty("dtstart").GetString());
+        Assert.Equal("2026-12-10", evt.GetProperty("dtend").GetString());
     }
 
     [Fact]

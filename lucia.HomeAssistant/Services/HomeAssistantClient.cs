@@ -344,9 +344,10 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         var evt = new Dictionary<string, object?>
         {
             ["summary"] = summary,
-            // The WebSocket API takes flat date/datetime strings, not nested dicts.
-            ["start"] = start.Date ?? start.DateTime,
-            ["end"] = end.Date ?? end.DateTime
+            // The WebSocket API takes flat iCalendar VEVENT fields (dtstart/dtend),
+            // not start/end — HA 2026.11 rejects the latter as invalid_format.
+            ["dtstart"] = start.Date ?? start.DateTime,
+            ["dtend"] = end.Date ?? end.DateTime
         };
         if (!string.IsNullOrEmpty(description))
             evt["description"] = description;
