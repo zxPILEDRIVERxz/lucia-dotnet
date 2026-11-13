@@ -200,9 +200,12 @@ public sealed class AgentDispatchExecutor : Executor
                     """)
             };
 
+            // Temperature must be 1.0: reasoning models (e.g. OpenAI with reasoning_effort)
+            // reject any other value, which previously made every clarification degrade to
+            // the canned fallback text.
             var response = await _chatClient.GetResponseAsync(
                 messages,
-                new ChatOptions { MaxOutputTokens = 128, Temperature = 0.7f },
+                new ChatOptions { MaxOutputTokens = 128, Temperature = 1.0f },
                 cancellationToken).ConfigureAwait(false);
 
             var text = response.Text?.Trim();

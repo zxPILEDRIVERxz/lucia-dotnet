@@ -2,6 +2,7 @@ using FakeItEasy;
 using lucia.Agents.Abstractions;
 using lucia.Agents.Orchestration;
 using lucia.Agents.Orchestration.Models;
+using lucia.Tests.TestDoubles;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -303,5 +304,50 @@ public sealed class AgentDispatchExecutorTests
         Assert.Contains("light-agent", invokedAgents);
         Assert.Contains("music-agent", invokedAgents);
         Assert.Equal(2, results.Count);
+    }
+
+    /// <summary>
+    /// Regression: clarification generation must send temperature 1.0. The old hardcoded
+    /// 0.7 was rejected by reasoning models (OpenAI requires temperature=1 when
+    /// reasoning_effort is set), so every clarification degraded to the canned fallback
+    /// while pod logs showed "Failed to generate clarification prompt via LLM".
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_Clarification_UsesTemperatureOneForReasoningModelCompatibility()
+    {
+        var chatClient = new StubChatClient(
+        [
+            _ => new ChatResponse([new ChatMessage(ChatRole.Assistant, "What time did you have in mind?")])
+        ]);
+
+        var executor = new AgentDispatchExecutor(
+            new Dictionary<string, IAgentInvoker>(StringComparer.OrdinalIgnoreCase),
+            A.Fake<Microsoft.Extensions.Logging.ILogger<AgentDispatchExecutor>>(),
+            Options.Create(new RouterExecutorOptions()),
+            chatClient);
+
+        executor.SetUserMessage(new ChatMessage(ChatRole.User, "add an event at 6:30 today"), "add an event at 6:30 today");
+
+        var choice = new AgentChoiceResult
+        {
+            AgentId = RouterExecutorOptions.DefaultClarificationAgentId,
+            Reasoning = "I'm not sure which agent should help. Did you mean to add a calendar event?",
+            Confidence = 0.5
+        };
+
+        // Act
+        var results = await executor.HandleAsync(choice, A.Fake<IWorkflowContext>(), CancellationToken.None);
+
+        // Assert — LLM-generated question wins over the fallback, at temperature 1.0
+        var response = Assert.Single(results);
+        Assert.Equal(RouterExecutorOptions.DefaultClarificationAgentId, response.AgentId);
+        Assert.True(response.Success);
+        Assert.True(response.NeedsInput);
+        Assert.Equal("What time did you have in mind?", response.Content);
+
+        var capturedOptions = Assert.Single(chatClient.CapturedOptions);
+        Assert.NotNull(capturedOptions);
+        Assert.Equal(1.0f, (float?)capturedOptions!.Temperature);
+        Assert.Equal(128, (int?)capturedOptions.MaxOutputTokens);
     }
 }
