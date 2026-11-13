@@ -113,7 +113,7 @@ public sealed class HomeAssistantCalendarToolProvider : IAgentToolProvider
     public async Task<string> CreateCalendarEventAsync(
         [Description("The event title.")] string summary,
         [Description("Start as ISO 8601 datetime (e.g. 2026-11-25T14:00:00+01:00) or all-day date (e.g. 2026-12-01).")] string start,
-        [Description("End as ISO 8601 datetime or all-day date — same form as start.")] string end,
+        [Description("End as ISO 8601 datetime or all-day date — same form as start. If the user gave no duration, use one hour after start (all-day: the day after).")] string end,
         [Description("Calendar entity id or friendly name. Required when more than one calendar is in scope.")] string? calendar = null,
         [Description("Optional event notes.")] string? description = null,
         [Description("Optional event location.")] string? location = null,

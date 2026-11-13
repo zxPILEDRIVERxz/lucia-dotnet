@@ -198,6 +198,126 @@ public class HomeAssistantCalendarClientTests
         Assert.Contains("400: Bad Request", ex.Message);
     }
 
+    // ── Create duration normalization (HA 2026.11 rejects end <= start) ──
+
+    [Fact]
+    public async Task CreateCalendarEvent_ZeroDurationTimed_DefaultsEndToOneHourAfterStart()
+    {
+        List<(string Method, string Path, string Body)> requests = [];
+        var client = CreateClient(request =>
+        {
+            requests.Add((request.Method.ToString(), request.RequestUri!.PathAndQuery, ReadBody(request)));
+            return JsonResponse("[]");
+        });
+
+        // LLMs routinely echo start into end when the user names no duration;
+        // HA 2026.11 answers such zero-length events with a bare 400 Bad Request.
+        await client.CreateCalendarEventAsync(
+            "calendar.local",
+            "Live test",
+            new CalendarDateTime { DateTime = "2026-11-13T20:00:00-05:00" },
+            new CalendarDateTime { DateTime = "2026-11-13T20:00:00-05:00" });
+
+        var (_, _, body) = requests.Single();
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+        Assert.Equal("2026-11-13T20:00:00-05:00", root.GetProperty("start_date_time").GetString());
+        Assert.Equal("2026-11-13T21:00:00-05:00", root.GetProperty("end_date_time").GetString());
+    }
+
+    [Fact]
+    public async Task CreateCalendarEvent_NegativeDurationTimed_DefaultsEndToOneHourAfterStart()
+    {
+        List<(string Method, string Path, string Body)> requests = [];
+        var client = CreateClient(request =>
+        {
+            requests.Add((request.Method.ToString(), request.RequestUri!.PathAndQuery, ReadBody(request)));
+            return JsonResponse("[]");
+        });
+
+        await client.CreateCalendarEventAsync(
+            "calendar.local",
+            "Backwards",
+            new CalendarDateTime { DateTime = "2026-11-13T20:00:00-05:00" },
+            new CalendarDateTime { DateTime = "2026-11-13T19:00:00-05:00" });
+
+        var (_, _, body) = requests.Single();
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+        Assert.Equal("2026-11-13T20:00:00-05:00", root.GetProperty("start_date_time").GetString());
+        Assert.Equal("2026-11-13T21:00:00-05:00", root.GetProperty("end_date_time").GetString());
+    }
+
+    [Fact]
+    public async Task CreateCalendarEvent_ValidDurationTimed_IsLeftUnchanged()
+    {
+        List<(string Method, string Path, string Body)> requests = [];
+        var client = CreateClient(request =>
+        {
+            requests.Add((request.Method.ToString(), request.RequestUri!.PathAndQuery, ReadBody(request)));
+            return JsonResponse("[]");
+        });
+
+        await client.CreateCalendarEventAsync(
+            "calendar.local",
+            "On time",
+            new CalendarDateTime { DateTime = "2026-11-13T20:00:00-05:00" },
+            new CalendarDateTime { DateTime = "2026-11-13T20:30:00-05:00" });
+
+        var (_, _, body) = requests.Single();
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+        Assert.Equal("2026-11-13T20:00:00-05:00", root.GetProperty("start_date_time").GetString());
+        Assert.Equal("2026-11-13T20:30:00-05:00", root.GetProperty("end_date_time").GetString());
+    }
+
+    [Fact]
+    public async Task CreateCalendarEvent_ZeroDurationAllDay_DefaultsEndToNextDay()
+    {
+        List<(string Method, string Path, string Body)> requests = [];
+        var client = CreateClient(request =>
+        {
+            requests.Add((request.Method.ToString(), request.RequestUri!.PathAndQuery, ReadBody(request)));
+            return JsonResponse("[]");
+        });
+
+        // All-day end dates are exclusive in HA; a single day needs end = start + 1.
+        await client.CreateCalendarEventAsync(
+            "calendar.local",
+            "Birthday",
+            new CalendarDateTime { Date = "2026-12-01" },
+            new CalendarDateTime { Date = "2026-12-01" });
+
+        var (_, _, body) = requests.Single();
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+        Assert.Equal("2026-12-01", root.GetProperty("start_date").GetString());
+        Assert.Equal("2026-12-02", root.GetProperty("end_date").GetString());
+    }
+
+    [Fact]
+    public async Task CreateCalendarEvent_NegativeDurationAllDay_DefaultsEndToNextDay()
+    {
+        List<(string Method, string Path, string Body)> requests = [];
+        var client = CreateClient(request =>
+        {
+            requests.Add((request.Method.ToString(), request.RequestUri!.PathAndQuery, ReadBody(request)));
+            return JsonResponse("[]");
+        });
+
+        await client.CreateCalendarEventAsync(
+            "calendar.local",
+            "Birthday (late end)",
+            new CalendarDateTime { Date = "2026-12-05" },
+            new CalendarDateTime { Date = "2026-12-01" });
+
+        var (_, _, body) = requests.Single();
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+        Assert.Equal("2026-12-05", root.GetProperty("start_date").GetString());
+        Assert.Equal("2026-12-06", root.GetProperty("end_date").GetString());
+    }
+
     // ── Delete (WebSocket) ──────────────────────────────────────────
 
     [Fact]

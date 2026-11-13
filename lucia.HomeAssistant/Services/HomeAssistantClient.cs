@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
@@ -284,6 +285,7 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         CancellationToken cancellationToken = default)
     {
         ValidateCalendarTimePair(start, end);
+        (start, end) = NormalizeCalendarDuration(start, end);
 
         var payload = new Dictionary<string, object?>
         {
@@ -337,6 +339,7 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         CancellationToken cancellationToken = default)
     {
         ValidateCalendarTimePair(start, end);
+        (start, end) = NormalizeCalendarDuration(start, end);
 
         var evt = new Dictionary<string, object?>
         {
@@ -369,6 +372,42 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
                 "Start and end must both be all-day dates or both be datetimes.",
                 nameof(start));
         }
+    }
+
+    /// <summary>
+    /// HA 2026.11 rejects calendar events whose end is not after the start (REST
+    /// create answers with a bare 400). LLM callers routinely echo start into end
+    /// when the user names no duration, so normalize such pairs instead of failing:
+    /// timed events get a one-hour duration, all-day events one day (all-day end
+    /// dates are exclusive in HA).
+    /// </summary>
+    private static (CalendarDateTime Start, CalendarDateTime End) NormalizeCalendarDuration(CalendarDateTime start, CalendarDateTime end)
+    {
+        if (start.Date is not null && end.Date is not null)
+        {
+            var startDate = DateOnly.Parse(start.Date, CultureInfo.InvariantCulture);
+            var endDate = DateOnly.Parse(end.Date, CultureInfo.InvariantCulture);
+            return endDate > startDate
+                ? (start, end)
+                : (start, new CalendarDateTime
+                {
+                    Date = startDate.AddDays(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                });
+        }
+
+        if (start.DateTime is not null && end.DateTime is not null)
+        {
+            var startDt = DateTimeOffset.Parse(start.DateTime, CultureInfo.InvariantCulture);
+            var endDt = DateTimeOffset.Parse(end.DateTime, CultureInfo.InvariantCulture);
+            return endDt > startDt
+                ? (start, end)
+                : (start, new CalendarDateTime
+                {
+                    DateTime = startDt.AddHours(1).ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture)
+                });
+        }
+
+        return (start, end);
     }
 
     // ── Shopping List ───────────────────────────────────────────────
