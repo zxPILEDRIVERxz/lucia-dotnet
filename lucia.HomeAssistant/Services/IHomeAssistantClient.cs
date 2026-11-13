@@ -95,6 +95,44 @@ public interface IHomeAssistantClient
         string? end = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Creates an event on the specified calendar via the calendar.create_event service.
+    /// All-day events use date-only <see cref="CalendarDateTime"/> values and timed events
+    /// use datetime values; start and end must use the same form.
+    /// </summary>
+    Task CreateCalendarEventAsync(
+        string calendarEntityId,
+        string summary,
+        CalendarDateTime start,
+        CalendarDateTime end,
+        string? description = null,
+        string? location = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes an event by its uid via the WebSocket API (calendar/event/delete).
+    /// Deleting a recurring event removes the whole series.
+    /// </summary>
+    Task DeleteCalendarEventAsync(
+        string calendarEntityId,
+        string uid,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates an event by its uid via the WebSocket API (calendar/event/update).
+    /// Summary, start, and end are required; non-empty description/location replace
+    /// the existing values.
+    /// </summary>
+    Task UpdateCalendarEventAsync(
+        string calendarEntityId,
+        string uid,
+        string summary,
+        CalendarDateTime start,
+        CalendarDateTime end,
+        string? description = null,
+        string? location = null,
+        CancellationToken cancellationToken = default);
+
     // ── Templates ───────────────────────────────────────────────────
 
     /// <summary>Render a Home Assistant Jinja2 template.</summary>

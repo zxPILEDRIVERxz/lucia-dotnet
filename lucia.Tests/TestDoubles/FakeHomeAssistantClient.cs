@@ -302,6 +302,33 @@ internal sealed class FakeHomeAssistantClient : IHomeAssistantClient
         CancellationToken cancellationToken = default)
         => Task.FromResult(Array.Empty<CalendarEvent>());
 
+    public Task CreateCalendarEventAsync(
+        string calendarEntityId,
+        string summary,
+        CalendarDateTime start,
+        CalendarDateTime end,
+        string? description = null,
+        string? location = null,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task DeleteCalendarEventAsync(
+        string calendarEntityId,
+        string uid,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
+    public Task UpdateCalendarEventAsync(
+        string calendarEntityId,
+        string uid,
+        string summary,
+        CalendarDateTime start,
+        CalendarDateTime end,
+        string? description = null,
+        string? location = null,
+        CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
+
     public Task<string> RenderTemplateAsync(TemplateRenderRequest request, CancellationToken cancellationToken = default)
         => Task.FromResult(string.Empty);
 

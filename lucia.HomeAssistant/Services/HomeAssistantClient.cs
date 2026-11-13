@@ -261,7 +261,7 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         return await GetArrayAsync<CalendarEntity>("/api/calendars", cancellationToken);
     }
 
-    /// <summary>Returns the list of calendar events for the specified calendar.</summary>
+    /// <inheritdoc />
     public async Task<CalendarEvent[]> GetCalendarEventsAsync(
         string calendarEntityId,
         string? start = null,
@@ -271,6 +271,109 @@ public sealed class HomeAssistantClient : IHomeAssistantClient
         var qs = BuildQueryString(("start", start), ("end", end));
         var path = $"/api/calendars/{Uri.EscapeDataString(calendarEntityId)}{qs}";
         return await GetArrayAsync<CalendarEvent>(path, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task CreateCalendarEventAsync(
+        string calendarEntityId,
+        string summary,
+        CalendarDateTime start,
+        CalendarDateTime end,
+        string? description = null,
+        string? location = null,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateCalendarTimePair(start, end);
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["entity_id"] = calendarEntityId,
+            ["summary"] = summary
+        };
+        if (start.Date is not null)
+        {
+            payload["start_date"] = start.Date;
+            payload["end_date"] = end.Date;
+        }
+        else
+        {
+            payload["start_datetime"] = start.DateTime;
+            payload["end_datetime"] = end.DateTime;
+        }
+        if (!string.IsNullOrEmpty(description))
+            payload["description"] = description;
+        if (!string.IsNullOrEmpty(location))
+            payload["location"] = location;
+
+        await PostAsync<object?>("/api/services/calendar/create_event", payload, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task DeleteCalendarEventAsync(
+        string calendarEntityId,
+        string uid,
+        CancellationToken cancellationToken = default)
+    {
+        return SendWebSocketCommandAsync<object?>(
+            "calendar/event/delete",
+            new Dictionary<string, object>
+            {
+                ["entity_id"] = calendarEntityId,
+                ["uid"] = uid
+            },
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task UpdateCalendarEventAsync(
+        string calendarEntityId,
+        string uid,
+        string summary,
+        CalendarDateTime start,
+        CalendarDateTime end,
+        string? description = null,
+        string? location = null,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateCalendarTimePair(start, end);
+
+        var evt = new Dictionary<string, object?>
+        {
+            ["summary"] = summary,
+            ["start"] = ToApiDate(start),
+            ["end"] = ToApiDate(end)
+        };
+        if (!string.IsNullOrEmpty(description))
+            evt["description"] = description;
+        if (!string.IsNullOrEmpty(location))
+            evt["location"] = location;
+
+        return SendWebSocketCommandAsync<object?>(
+            "calendar/event/update",
+            new Dictionary<string, object>
+            {
+                ["entity_id"] = calendarEntityId,
+                ["uid"] = uid,
+                ["event"] = evt
+            },
+            cancellationToken);
+    }
+
+    private static void ValidateCalendarTimePair(CalendarDateTime start, CalendarDateTime end)
+    {
+        if ((start.Date is null) != (end.Date is null))
+        {
+            throw new ArgumentException(
+                "Start and end must both be all-day dates or both be datetimes.",
+                nameof(start));
+        }
+    }
+
+    private static Dictionary<string, string> ToApiDate(CalendarDateTime value)
+    {
+        return value.Date is not null
+            ? new Dictionary<string, string> { ["date"] = value.Date! }
+            : new Dictionary<string, string> { ["dateTime"] = value.DateTime! };
     }
 
     // ── Shopping List ───────────────────────────────────────────────
