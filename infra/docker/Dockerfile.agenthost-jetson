@@ -172,7 +172,7 @@ COPY --from=publish --chown=appuser:appuser /app/publish .
 # Copy built SPA dashboard into wwwroot for static file serving
 COPY --from=node-build --chown=appuser:appuser /app/dist ./wwwroot/
 
-# Copy official plugins (MetaMCP, Brave Search, SearXNG) so env-based tools are registered at startup
+# Copy official plugins (MetaMCP, Brave Search, SearXNG, Home Assistant Calendar) so env-based tools are registered at startup
 COPY --from=build --chown=appuser:appuser /src/plugins ./plugins
 # Seed script for the chart's seed-plugins init container: marker-based sync of
 # bundled plugins into the persistent volume (see infra/docker/scripts/seed-plugins.sh).

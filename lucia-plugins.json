@@ -22,6 +22,13 @@
       "description": "Web search skill using a SearXNG instance for privacy-respecting search.",
       "version": "1.0.0",
       "path": "plugins/searxng"
+    },
+    {
+      "id": "home-assistant-calendar",
+      "name": "Home Assistant Calendar",
+      "description": "List, create, update, and delete events on your Home Assistant calendars using Lucia's existing Home Assistant connection.",
+      "version": "1.0.0",
+      "path": "plugins/home-assistant-calendar"
     }
   ]
 }

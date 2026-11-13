@@ -531,8 +531,10 @@ lucia-dotnet/
 │       ├── context/              # Auth context and providers
 │       └── api.ts                # API client functions
 ├── plugins/                      # Plugin scripts (each subfolder = one plugin)
-│   ├── metamcp/plugin.cs         # MetaMCP tool aggregation bridge
-│   └── searxng/plugin.cs         # SearXNG web search skill
+│   ├── brave-search/plugin.cs             # Brave Search web search skill
+│   ├── home-assistant-calendar/plugin.cs  # Home Assistant calendar event tools
+│   ├── metamcp/plugin.cs                  # MetaMCP tool aggregation bridge
+│   └── searxng/plugin.cs                  # SearXNG web search skill
 ├── lucia-plugins.json            # Official plugin repository manifest
 ├── lucia.ServiceDefaults/        # OpenTelemetry, health checks, resilience
 ├── lucia.Tests/                  # xUnit tests (unit, integration, eval, plugin system)
