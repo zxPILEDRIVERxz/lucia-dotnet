@@ -73,6 +73,77 @@ public sealed class RouterExecutorTests
         Assert.Equal("schalte den keller ein", result.OriginalUserText);
     }
 
+    /// <summary>
+    /// Pipeline guard: plugin capabilities are only visible to the router through skill
+    /// examples on the agent card (the catalog never prints skill names or descriptions).
+    /// Cards that advertise examples must have them rendered into the catalog prompt so
+    /// e.g. "add an event at 6:30" can be matched against a calendar-capable agent.
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_AgentCatalogIncludesSkillExamples()
+    {
+        var responsePayload = JsonSerializer.Serialize(new
+        {
+            agentId = "general-assistant",
+            reasoning = "Calendar request",
+            confidence = 0.9
+        });
+
+        var chatClient = new StubChatClient(
+        [
+            _ => new ChatResponse([new ChatMessage(ChatRole.Assistant, responsePayload)])
+        ]);
+
+        var registry = A.Fake<IAgentRegistry>();
+        var agent = new AgentCard
+        {
+            Name = "general-assistant",
+            Description = "Agent for handling general knowledge questions in Home Assistant",
+            Version = "1.0.0",
+            Capabilities = new AgentCapabilities(),
+            DefaultInputModes = ["text"],
+            DefaultOutputModes = ["text"],
+            Skills =
+            [
+                new AgentSkill
+                {
+                    Id = "id_home_assistant_calendar",
+                    Name = "Home Assistant Calendar",
+                    Description = "List, create, update, and delete events on your Home Assistant calendars.",
+                    Examples = ["What's on my calendar this week?", "Add Carnizza to the calendar at 6:30 today"],
+                },
+                new AgentSkill
+                {
+                    Id = "id_personal_memory",
+                    Name = "Personal memory",
+                    Description = "No examples on this skill.",
+                }
+            ]
+        };
+
+        A.CallTo(() => registry.GetEnumerableAgentsAsync(A<CancellationToken>._))
+            .Returns(GetAgentsAsync(agent));
+
+        var router = new RouterExecutor(
+            chatClient,
+            registry,
+            A.Fake<Microsoft.Extensions.Logging.ILogger<RouterExecutor>>(),
+            new AgentsTelemetrySource(),
+            Options.Create(new RouterExecutorOptions()));
+
+        // Act
+        await router.HandleAsync(
+            new ChatMessage(ChatRole.User, "add an event at 6:30 today"),
+            A.Fake<IWorkflowContext>(),
+            CancellationToken.None);
+
+        // Assert — examples are rendered; the example-less skill contributes nothing
+        var systemPrompt = chatClient.CapturedMessages[0][0].Text!;
+        Assert.Contains("example: What's on my calendar this week?", systemPrompt);
+        Assert.Contains("example: Add Carnizza to the calendar at 6:30 today", systemPrompt);
+        Assert.DoesNotContain("No examples on this skill.", systemPrompt);
+    }
+
     [Fact]
     public async Task HandleAsync_SlugifiedAgentId_ResolvesToCanonicalCardName()
     {

@@ -177,11 +177,14 @@ public sealed class GeneralAgent : ILuciaAgent
                 {
                     if (provider.Tools.Count > 0 && !_agent.Skills.Any(skill => skill.Id == provider.ServerId))
                     {
+                        // Examples are the only skill metadata the router catalog prints,
+                        // so without them this capability is invisible to routing.
                         _agent.Skills.Add(new AgentSkill
                         {
                             Id = provider.ServerId,
                             Name = provider.Name,
                             Description = provider.Description,
+                            Examples = provider.RoutingExamples is { Count: > 0 } examples ? [.. examples] : null,
                         });
                     }
                 }

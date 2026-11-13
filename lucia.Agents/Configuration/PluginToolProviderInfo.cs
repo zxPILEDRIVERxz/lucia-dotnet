@@ -9,5 +9,6 @@ public sealed class PluginToolProviderInfo
     public required string Name { get; init; }
     public required string Description { get; init; }
     public string? ErrorMessage { get; init; }
+    public IReadOnlyList<string>? RoutingExamples { get; init; }
     public IReadOnlyList<McpToolInfo> Tools { get; init; } = [];
 }

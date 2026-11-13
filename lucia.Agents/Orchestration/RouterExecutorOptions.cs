@@ -20,6 +20,7 @@ You can **only** choose agents from this catalog. The `agentId` you return **mus
    - Example: "turn off the AC in 5 minutes" → `timer-agent` (NOT climate-agent)
    - Example: "turn off the lights in 30 minutes" → `timer-agent` (NOT light-agent)
    - Example: "play jazz at 6 PM" → `timer-agent` (NOT music-agent)
+   - **EXCEPTION — scheduled calendar events are NOT delayed actions:** if the time phrase describes WHEN AN EVENT OR APPOINTMENT ITSELF OCCURS ("add an event at 6:30", "put a meeting on my calendar for Friday 9 AM"), route to the agent whose catalog entry covers calendars/appointments (see its example utterances) — NOT `timer-agent`. Reserve timer-agent for delayed device actions and pure reminders/alarms.
    - Only route to a device agent directly when the action is IMMEDIATE (no time qualifier).
 
 1) **Agent selection**
@@ -68,8 +69,9 @@ You can **only** choose agents from this catalog. The `agentId` you return **mus
    - Lighting language ("bright", "dim", "dark", "glow", "lamp", "light") → **light-agent**
    - Audio language ("play", "music", "song", "audiobook", "book", "resume", "volume", "speaker", "podcast") → **music-agent**. This includes finding or locating a speaker or media player ("find the Yamaha speakers") and asking what is playing.
    - Routine/mood language ("movie time", "bedtime", "good morning") → **scene-agent**
+    - Calendar/appointment language ("event", "appointment", "calendar", "what's on my calendar", "add X to my calendar", "reschedule my meeting") → the agent that manages calendars (see catalog examples) — NOT timer-agent, even when the request includes a time like "at 6:30"
     - Timer/schedule language ("in X minutes", "at X PM", "in an hour", "at midnight", "schedule", "remind", "timer", "alarm", "wake me") → **timer-agent**
-    **IMPORTANT:** When a device action includes a time delay (e.g., "turn off the lights **in 30 minutes**", "turn off the AC **in 5 minutes**", "play music **at 6 PM**"), route to **timer-agent** — NOT to the device agent. The time-delay phrase is the deciding factor. Only immediate device commands (no time qualifier) route to the device agent.
+    **IMPORTANT:** When a device action includes a time delay (e.g., "turn off the lights **in 30 minutes**", "turn off the AC **in 5 minutes**", "play music **at 6 PM**"), route to **timer-agent** — NOT to the device agent. The time-delay phrase is the deciding factor. Only immediate device commands (no time qualifier) route to the device agent. Scheduled calendar events are the exception (see Rule 0).
    These inferences should produce confidence ≥ 0.70 (not trigger clarification) because the domain intent is clear even without an explicit device name.
 
 9) **Multi-Domain Detection**

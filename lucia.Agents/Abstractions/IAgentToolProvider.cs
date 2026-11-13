@@ -25,6 +25,14 @@ public interface IAgentToolProvider
     /// <summary>Optional hint appended to instructions when the agent uses this provider's tools.</summary>
     string? InstructionHint => null;
 
+    /// <summary>
+    /// Optional example user utterances that let the orchestrator router recognize this
+    /// capability. The general agent copies them onto its agent card skill, and the
+    /// router advertises card skill examples in the agent catalog — without them the
+    /// router cannot route to this provider.
+    /// </summary>
+    IReadOnlyList<string>? RoutingExamples => null;
+
     /// <summary>Returns the AI tools exposed by this provider.</summary>
     IList<AITool> GetTools();
 

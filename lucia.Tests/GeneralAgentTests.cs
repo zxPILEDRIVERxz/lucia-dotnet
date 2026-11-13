@@ -203,6 +203,49 @@ public sealed class GeneralAgentTests
         A.CallTo(() => homelab.InitializeAsync(A<CancellationToken>._)).MustHaveHappenedOnceExactly();
     }
 
+    /// <summary>
+    /// Regression: the router catalog only advertises skill *examples*, never skill names
+    /// or descriptions. Plugin providers that don't supply routing examples were invisible
+    /// to the router (calendar requests misrouted to timer-agent). Providers must surface
+    /// their RoutingExamples on the general agent's card so the catalog can see them.
+    /// </summary>
+    [Fact]
+    public async Task ToolProviders_RoutingExamples_AreAdvertisedOnAgentCardSkill()
+    {
+        var calendar = CreateToolProvider(
+            "Home Assistant Calendar",
+            "List, create, update, and delete events on your Home Assistant calendars.",
+            null,
+            ["What's on my calendar this week?", "Add Carnizza to the calendar at 6:30 today"],
+            "list_calendar_events");
+        var resolver = A.Fake<IChatClientResolver>();
+        A.CallTo(() => resolver.ResolveAIAgentAsync(A<string?>._, A<CancellationToken>._))
+            .Returns(Task.FromResult<AIAgent?>(A.Fake<AIAgent>()));
+
+        var agent = CreateAgent(resolver, A.Fake<IAgentDefinitionRepository>(), [calendar]);
+        await agent.InitializeAsync();
+
+        var skill = Assert.Single(agent.GetAgentCard().Skills, s => s.Name == "Home Assistant Calendar");
+        Assert.Equal(
+            ["What's on my calendar this week?", "Add Carnizza to the calendar at 6:30 today"],
+            skill.Examples);
+    }
+
+    [Fact]
+    public async Task ToolProviders_WithoutRoutingExamples_PublishNoCardSkillExamples()
+    {
+        var provider = CreateToolProvider("Homelab", "Homelab status", null, "homelab_status");
+        var resolver = A.Fake<IChatClientResolver>();
+        A.CallTo(() => resolver.ResolveAIAgentAsync(A<string?>._, A<CancellationToken>._))
+            .Returns(Task.FromResult<AIAgent?>(A.Fake<AIAgent>()));
+
+        var agent = CreateAgent(resolver, A.Fake<IAgentDefinitionRepository>(), [provider]);
+        await agent.InitializeAsync();
+
+        var skill = Assert.Single(agent.GetAgentCard().Skills, s => s.Name == "Homelab");
+        Assert.Empty(skill.Examples ?? []);
+    }
+
     [Fact]
     public async Task ToolProviders_InitializeFailure_DoesNotBlockAgent()
     {
@@ -265,11 +308,16 @@ public sealed class GeneralAgentTests
 
     private static IAgentToolProvider CreateToolProvider(
         string name, string description, string? hint, params string[] toolNames)
+        => CreateToolProvider(name, description, hint, null, toolNames);
+
+    private static IAgentToolProvider CreateToolProvider(
+        string name, string description, string? hint, string[]? routingExamples, params string[] toolNames)
     {
         var provider = A.Fake<IAgentToolProvider>();
         A.CallTo(() => provider.Name).Returns(name);
         A.CallTo(() => provider.Description).Returns(description);
         A.CallTo(() => provider.InstructionHint).Returns(hint);
+        A.CallTo(() => provider.RoutingExamples).Returns(routingExamples);
         A.CallTo(() => provider.GetTools()).ReturnsLazily(() =>
             toolNames.Select(n => (Microsoft.Extensions.AI.AITool)Microsoft.Extensions.AI.AIFunctionFactory.Create(() => n, n)).ToList());
         return provider;

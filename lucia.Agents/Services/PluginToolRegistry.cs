@@ -40,6 +40,7 @@ public sealed partial class PluginToolRegistry : IDisposable
             ServerId = entry.Key,
             Name = entry.Value.Name,
             Description = entry.Value.Description,
+            RoutingExamples = entry.Value.RoutingExamples,
             ErrorMessage = _errors.GetValueOrDefault(entry.Key),
             Tools = _tools.TryGetValue(entry.Key, out var tools)
                 ? tools.Select(tool => new McpToolInfo

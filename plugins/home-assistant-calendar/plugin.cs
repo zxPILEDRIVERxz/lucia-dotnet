@@ -40,6 +40,18 @@ public sealed class HomeAssistantCalendarToolProvider : IAgentToolProvider
         "Call list_calendar_events first to get event uids, then pass a uid (and the calendar name when more than one calendar is in scope) to update or delete an event. " +
         "Deleting or updating a recurring event by uid affects the whole series — confirm with the user before doing that.";
 
+    // Example utterances for router visibility: the agent catalog only prints skill
+    // examples, so without these the router cannot route calendar requests here.
+    public IReadOnlyList<string>? RoutingExamples =>
+    [
+        "What's on my calendar this week?",
+        "Add an event for Carnizza to the calendar at 6:30 today",
+        "Put an event on my calendar for Saturday at 2 PM",
+        "Put a dentist appointment on my calendar for Friday at 9 AM",
+        "Move my 3 PM meeting to tomorrow morning",
+        "Delete the birthday party from my calendar",
+    ];
+
     public IList<AITool> GetTools() =>
     [
         AIFunctionFactory.Create(ListCalendarEventsAsync, new AIFunctionFactoryOptions { Name = "list_calendar_events" }),

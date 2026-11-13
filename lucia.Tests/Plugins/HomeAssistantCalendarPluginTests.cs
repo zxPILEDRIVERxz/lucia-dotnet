@@ -200,6 +200,25 @@ public sealed class HomeAssistantCalendarPluginTests : IDisposable
         Assert.Null(harness.App.Services.GetService<IAgentToolProvider>());
     }
 
+    /// <summary>
+    /// Regression: without routing examples the calendar capability was invisible to the
+    /// router (catalog prints skill examples only), so calendar requests misrouted to
+    /// timer-agent. The provider must publish example utterances for router visibility.
+    /// </summary>
+    [Fact]
+    public void Provider_PublishesRoutingExamplesForRouterVisibility()
+    {
+        var client = A.Fake<IHomeAssistantClient>();
+        using var harness = new Harness(client);
+
+        var examples = harness.GetProvider().RoutingExamples;
+
+        Assert.NotNull(examples);
+        Assert.True(examples!.Count >= 4, $"expected at least 4 routing examples, got {examples.Count}");
+        Assert.Contains(examples, e => e.Contains("calendar", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(examples, e => e.Contains("event", StringComparison.OrdinalIgnoreCase));
+    }
+
     // ── list_calendar_events ────────────────────────────────────────
 
     [Fact]
