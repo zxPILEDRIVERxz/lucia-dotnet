@@ -53,6 +53,16 @@ public sealed class TimerScheduledTask : IScheduledTask
         await using var scope = services.CreateAsyncScope();
         var haClient = scope.ServiceProvider.GetRequiredService<IHomeAssistantClient>();
 
+        // Home Assistant accepts targeted service calls for unknown entities and silently matches
+        // nothing, so a target that no longer exists would announce into the void. Verify first —
+        // a vanished target fails the task loudly; a transient HA error propagates as before.
+        var state = await haClient.GetStateAsync(EntityId, cancellationToken).ConfigureAwait(false);
+        if (state is null)
+        {
+            throw new InvalidOperationException(
+                $"Timer {Id} cannot announce: target entity '{EntityId}' no longer exists in Home Assistant.");
+        }
+
         var request = new ServiceCallRequest
         {
             EntityId = EntityId,

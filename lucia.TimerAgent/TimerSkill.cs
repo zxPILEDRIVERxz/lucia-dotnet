@@ -57,8 +57,8 @@ public sealed class TimerSkill
                     Use this when the user asks to set a timer, reminder, or alarm for a specific duration.
                     The durationSeconds parameter is the number of seconds until the timer fires.
                     The message parameter is a friendly announcement message to play when the timer expires (e.g. "Your pizza timer is done!").
-                    The entityId parameter is the location name or area where the announcement should play (e.g. "office", "bedroom").
-                    It can also be a full Home Assistant entity_id (e.g. "assist_satellite.my_satellite").
+                    The entityId parameter should be the location name or area where the announcement should play (e.g. "office", "bedroom"); prefer location names over entity ids.
+                    It can also be an assist_satellite entity_id (e.g. "assist_satellite.kitchen_assist_satellite"), but only if that entity actually exists in Home Assistant — do not invent or guess entity ids, and never build one from a device id.
                     """
             }),
             AIFunctionFactory.Create(CancelTimerAsync, new AIFunctionFactoryOptions
@@ -230,21 +230,87 @@ public sealed class TimerSkill
 
     /// <summary>
     /// Resolves a location name or entity_id to an actual assist_satellite entity_id.
-    /// If the input already looks like a valid entity_id (contains a dot), returns it as-is.
-    /// Otherwise, searches the entity location service for assist_satellite entities in that area.
-    /// Announce capability is verified against each candidate's live state — Home Assistant's
-    /// entity registry does not carry <c>supported_features</c>, so the registry value (always 0)
-    /// cannot be used. Candidates whose state cannot be read are treated as unverified and
-    /// preferred over candidates confirmed to lack the announce capability.
+    /// A dotted input with the <c>assist_satellite</c> domain is validated against live Home
+    /// Assistant state: it is used as-is only when the entity exists and supports announce.
+    /// Entities that do not exist, lack the announce capability, or carry a different domain are
+    /// re-resolved from their name component via <see cref="ResolveSatelliteByNameAsync"/>. When
+    /// Home Assistant cannot be reached at all, the input is accepted as-is (legacy fail-open).
+    /// A bare location name is resolved directly through the entity location service.
     /// </summary>
     private async Task<string?> ResolveSatelliteEntityAsync(string input, CancellationToken cancellationToken)
     {
-        // Already a full entity_id — use as-is
         if (input.Contains('.'))
         {
-            return input;
+            var dotIndex = input.IndexOf('.');
+            var domain = input[..dotIndex];
+            var nameComponent = input[(dotIndex + 1)..];
+
+            // A non-assist_satellite domain can never be an announce target — never trust it.
+            if (!domain.Equals("assist_satellite", StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Entity id '{Input}' has unexpected domain '{Domain}' — re-resolving from name component '{Name}'",
+                    input, domain, nameComponent);
+                return await ResolveSatelliteByNameAsync(nameComponent, cancellationToken).ConfigureAwait(false);
+            }
+
+            HomeAssistantState? state;
+            try
+            {
+                state = await _homeAssistantClient.GetStateAsync(input, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // HA unreachable: the entity cannot be verified. Fail open with the legacy
+                // pass-through rather than rejecting a possibly-valid target.
+                _logger.LogWarning(ex, "Could not verify satellite '{Input}' against Home Assistant — accepting as-is", input);
+                return input;
+            }
+
+            if (state is null)
+            {
+                _logger.LogWarning(
+                    "Satellite '{Input}' does not exist in Home Assistant — re-resolving from name component '{Name}'",
+                    input, nameComponent);
+                return await ResolveSatelliteByNameAsync(nameComponent, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!state.Attributes.TryGetValue("supported_features", out var featObj)
+                || !int.TryParse(featObj?.ToString(), out var features))
+            {
+                _logger.LogWarning(
+                    "Could not read supported_features for satellite '{Input}' — accepting as-is", input);
+                return input;
+            }
+
+            if (((SupportedFeaturesFlags)features).HasFlag(SupportedFeaturesFlags.Announce))
+            {
+                return input;
+            }
+
+            _logger.LogWarning(
+                "Satellite '{Input}' does not support announce (features={Features}) — re-resolving from name component '{Name}'",
+                input, features, nameComponent);
+            return await ResolveSatelliteByNameAsync(nameComponent, cancellationToken).ConfigureAwait(false);
         }
 
+        return await ResolveSatelliteByNameAsync(input, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Searches the entity location service for assist_satellite entities matching the given
+    /// name or area and returns the best announce-capable candidate. Announce capability is
+    /// verified against each candidate's live state — Home Assistant's entity registry does not
+    /// carry <c>supported_features</c>, so the registry value (always 0) cannot be used.
+    /// Candidates whose state cannot be read are treated as unverified and preferred over
+    /// candidates confirmed to lack the announce capability.
+    /// </summary>
+    private async Task<string?> ResolveSatelliteByNameAsync(string input, CancellationToken cancellationToken)
+    {
         if (_entityLocationService is not IAgentFilteredEntityLocationService filteredLocationService)
         {
             _logger.LogWarning("Agent-filtered satellite location search is unavailable");

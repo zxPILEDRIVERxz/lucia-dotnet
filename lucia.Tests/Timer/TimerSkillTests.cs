@@ -34,6 +34,18 @@ public sealed class TimerSkillTests
         A.CallTo(() => FilteredLocations.SearchHierarchyForAgentAsync(A<string>._, A<HybridMatchOptions?>._,
                 A<IReadOnlyList<string>?>._, A<string>._, A<CancellationToken>._))
             .Returns(HierarchyResults.Resolved([]));
+
+        // Default: every entity id is treated as a live announce-capable satellite so pre-existing
+        // tests that pass full entity ids keep their legacy outcome. Per-entity configurations made
+        // in individual tests are registered later and therefore take precedence (FakeItEasy).
+        A.CallTo(() => _haClient.GetStateAsync(A<string>._, A<CancellationToken>._))
+            .ReturnsLazily(call =>
+                Task.FromResult<HomeAssistantState?>(new()
+                {
+                    EntityId = call.GetArgument<string>(0)!,
+                    Attributes = new Dictionary<string, object> { ["supported_features"] = 3 }
+                }));
+
         _skill = new TimerSkill(_entityLocationService, _haClient, _taskStore, _taskRepository, _timeProvider, _logger);
     }
 
@@ -495,6 +507,113 @@ public sealed class TimerSkillTests
         cts.Cancel();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => _skill.ListTimers(cts.Token));
+    }
+
+    [Fact]
+    public async Task SetTimerAsync_FabricatedEntityId_HaReportsNotFound_ReResolvesFromNameComponent()
+    {
+        // The 2026-11-14 incident: the model passed "assist_satellite.<device-id>", Home Assistant
+        // has no such entity (404), and the timer later announced into the void. A nonexistent id
+        // must be re-resolved from its name component through the normal hierarchy search.
+        A.CallTo(() => _haClient.GetStateAsync("assist_satellite.06acdfbc697c0ad3cdd654cf31ab9e0c", A<CancellationToken>._))
+            .Returns(Task.FromResult<HomeAssistantState?>(null));
+
+        A.CallTo(() => FilteredLocations.SearchHierarchyForAgentAsync(
+                "06acdfbc697c0ad3cdd654cf31ab9e0c", A<HybridMatchOptions?>._, A<IReadOnlyList<string>?>._, "timer-agent", A<CancellationToken>._))
+            .Returns(HierarchyResults.Resolved(
+                [MakeSatellite("assist_satellite.kitchen_assist_satellite")]));
+
+        var result = await _skill.SetTimerAsync(480, "Eight-minute timer is done!", "assist_satellite.06acdfbc697c0ad3cdd654cf31ab9e0c");
+
+        Assert.Contains("set for", result);
+        A.CallTo(() => _taskRepository.UpsertAsync(
+                A<ScheduledTaskDocument>.That.Matches(d => d.EntityId == "assist_satellite.kitchen_assist_satellite"),
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task SetTimerAsync_FabricatedEntityId_HaReportsNotFound_NoSatelliteInArea_ReturnsNotFound()
+    {
+        A.CallTo(() => _haClient.GetStateAsync("assist_satellite.phantom", A<CancellationToken>._))
+            .Returns(Task.FromResult<HomeAssistantState?>(null));
+
+        var result = await _skill.SetTimerAsync(60, "Done!", "assist_satellite.phantom");
+
+        Assert.Contains("Could not find an assist_satellite device", result);
+        Assert.Equal(0, _skill.ActiveTimerCount);
+    }
+
+    [Fact]
+    public async Task SetTimerAsync_ValidEntityId_VerifiedLive_UsedAsIsWithoutHierarchySearch()
+    {
+        A.CallTo(() => _haClient.GetStateAsync("assist_satellite.kitchen", A<CancellationToken>._))
+            .Returns(Task.FromResult<HomeAssistantState?>(StateWithFeatures("assist_satellite.kitchen", 3)));
+
+        var result = await _skill.SetTimerAsync(60, "Done!", "assist_satellite.kitchen");
+
+        Assert.Contains("set for", result);
+        A.CallTo(() => FilteredLocations.SearchHierarchyForAgentAsync(A<string>._, A<HybridMatchOptions?>._,
+                A<IReadOnlyList<string>?>._, A<string>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task SetTimerAsync_EntityIdWithoutAnnounceCapability_ReResolvesFromNameComponent()
+    {
+        // features=2 (StartConversation only) — the named satellite cannot announce, so the name
+        // component is re-resolved and a capable satellite in the area wins.
+        A.CallTo(() => _haClient.GetStateAsync("assist_satellite.kitchen", A<CancellationToken>._))
+            .Returns(Task.FromResult<HomeAssistantState?>(StateWithFeatures("assist_satellite.kitchen", 2)));
+
+        A.CallTo(() => FilteredLocations.SearchHierarchyForAgentAsync(
+                "kitchen", A<HybridMatchOptions?>._, A<IReadOnlyList<string>?>._, "timer-agent", A<CancellationToken>._))
+            .Returns(HierarchyResults.Resolved(
+                [MakeSatellite("assist_satellite.kitchen_assist_satellite")]));
+
+        await _skill.SetTimerAsync(60, "Done!", "assist_satellite.kitchen");
+
+        A.CallTo(() => _taskRepository.UpsertAsync(
+                A<ScheduledTaskDocument>.That.Matches(d => d.EntityId == "assist_satellite.kitchen_assist_satellite"),
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public async Task SetTimerAsync_EntityId_HaUnreachable_AcceptsInputAsIs()
+    {
+        // HA unreachable (transient error, not a 404): the id cannot be verified, so keep the
+        // legacy fail-open pass-through rather than rejecting a possibly-valid target.
+        A.CallTo(() => _haClient.GetStateAsync("assist_satellite.kitchen", A<CancellationToken>._))
+            .Throws<HttpRequestException>();
+
+        var result = await _skill.SetTimerAsync(60, "Done!", "assist_satellite.kitchen");
+
+        Assert.Contains("set for", result);
+        A.CallTo(() => FilteredLocations.SearchHierarchyForAgentAsync(A<string>._, A<HybridMatchOptions?>._,
+                A<IReadOnlyList<string>?>._, A<string>._, A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task SetTimerAsync_WrongDomainEntityId_ReResolvesFromNameComponent()
+    {
+        // "media_player.x" can never be announced on — the domain is not trusted and only the name
+        // component may produce an assist_satellite target.
+        A.CallTo(() => FilteredLocations.SearchHierarchyForAgentAsync(
+                "kitchen", A<HybridMatchOptions?>._, A<IReadOnlyList<string>?>._, "timer-agent", A<CancellationToken>._))
+            .Returns(HierarchyResults.Resolved(
+                [MakeSatellite("assist_satellite.kitchen_assist_satellite")]));
+
+        await _skill.SetTimerAsync(60, "Done!", "media_player.kitchen");
+
+        A.CallTo(() => _taskRepository.UpsertAsync(
+                A<ScheduledTaskDocument>.That.Matches(d => d.EntityId == "assist_satellite.kitchen_assist_satellite"),
+                A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
+        // The wrong-domain id itself must never be validated or used as an announce target.
+        A.CallTo(() => _haClient.GetStateAsync("media_player.kitchen", A<CancellationToken>._))
+            .MustNotHaveHappened();
     }
 
     /// <summary>
