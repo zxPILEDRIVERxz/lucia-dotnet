@@ -359,6 +359,19 @@ public sealed class RouterExecutorTests
         Assert.Null(RouterExecutor.ToAgentSlug(input));
     }
 
+    [Fact]
+    public void DefaultSystemPrompt_DateTimeRule_TimestampIsAlreadyLocal_NoConversion()
+    {
+        // ContextReconstructor renders the REQUEST_CONTEXT timestamp in the user's local zone
+        // with an explicit offset, so the router must copy it verbatim — never convert UTC.
+        var prompt = RouterExecutorOptions.DefaultSystemPrompt;
+
+        Assert.Contains("Date & Time Forwarding", prompt);
+        Assert.Contains("already the user's local time", prompt);
+        Assert.Contains("Copy the value verbatim", prompt);
+        Assert.DoesNotContain("Convert the UTC timestamp", prompt);
+    }
+
     private static AgentCard CreateCard(string name, string description) => new()
     {
         Name = name,

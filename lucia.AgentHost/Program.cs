@@ -238,6 +238,8 @@ else
 builder.Services.AddSingleton<ResponseTemplateRenderer>();
 builder.Services.AddSingleton<IDirectSkillExecutor, DirectSkillExecutor>();
 builder.Services.AddSingleton<ICascadingEntityResolver, CascadingEntityResolver>();
+builder.Services.Configure<ContextReconstructorOptions>(
+    builder.Configuration.GetSection(ContextReconstructorOptions.SectionName));
 builder.Services.AddSingleton<ContextReconstructor>();
 builder.Services.AddSingleton<ConversationTelemetry>();
 builder.Services.AddSingleton<CommandTraceChannel>();

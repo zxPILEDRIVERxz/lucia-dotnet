@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using lucia.AgentHost.Conversation.Models;
 using lucia.Agents.Services;
 
@@ -36,15 +37,29 @@ public sealed class ContextReconstructor
 
     private readonly UserContextProvider? _userContextProvider;
     private readonly ChatHistoryProvider? _chatHistoryProvider;
+    private readonly TimeZoneInfo _timeZone;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ContextReconstructor"/> class.
     /// </summary>
-    public ContextReconstructor(UserContextProvider? userContextProvider = null, ChatHistoryProvider? chatHistoryProvider = null)
+    public ContextReconstructor(
+        UserContextProvider? userContextProvider = null,
+        ChatHistoryProvider? chatHistoryProvider = null,
+        IOptions<ContextReconstructorOptions>? options = null)
     {
         _userContextProvider = userContextProvider;
         _chatHistoryProvider = chatHistoryProvider;
+        var opts = options?.Value ?? new ContextReconstructorOptions();
+        _timeZone = ResolveTimeZone(opts.TimeZone);
     }
+
+    /// <summary>
+    /// Resolves the configured time zone, falling back to UTC when the id is absent or unknown.
+    /// </summary>
+    internal static TimeZoneInfo ResolveTimeZone(string? timeZoneId)
+        => string.IsNullOrWhiteSpace(timeZoneId) || !TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId, out var zone)
+            ? TimeZoneInfo.Utc
+            : zone;
 
     /// <summary>
     /// Reconstructs a full prompt string from the structured request for LLM consumption.
@@ -88,14 +103,18 @@ public sealed class ContextReconstructor
             await historyTask.ConfigureAwait(false));
     }
 
-    private static string BuildPrompt(ConversationRequest request, string userContext, IReadOnlyList<string> recentHistory)
+    private string BuildPrompt(ConversationRequest request, string userContext, IReadOnlyList<string> recentHistory)
     {
         var template = request.PromptOverride ?? DefaultTemplate;
 
         var context = request.Context;
+        // Render the timestamp in the user's local zone with an explicit offset. A bare UTC
+        // wall-clock value reads as local time to the model (5-hour skew on every date-sensitive
+        // turn) and drives day_of_week off the wrong calendar day late at night.
+        var local = context.Timestamp.ToOffset(_timeZone.GetUtcOffset(context.Timestamp.UtcDateTime));
         var prompt = template
-            .Replace("{timestamp}", context.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"))
-            .Replace("{dayOfWeek}", context.Timestamp.ToString("dddd"))
+            .Replace("{timestamp}", local.ToString("yyyy-MM-dd HH:mm:sszzz"))
+            .Replace("{dayOfWeek}", local.ToString("dddd"))
             .Replace("{location}", context.Location ?? "Home")
             .Replace("{deviceId}", context.DeviceId ?? "unknown")
             .Replace("{deviceArea}", context.DeviceArea ?? "unknown")

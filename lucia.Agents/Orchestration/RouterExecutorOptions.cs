@@ -82,6 +82,14 @@ You can **only** choose agents from this catalog. The `agentId` you return **mus
    - Example: "Turn off the bedroom lights and set the thermostat to 68" → primary: `light-agent`, additionalAgents: [`climate-agent`].
    - Do NOT collapse multi-domain requests into `general-assistant`.
 
+10) **Date & Time Forwarding**
+   - Your user message includes a REQUEST_CONTEXT block with a `timestamp` that is already the user's local time, including an explicit UTC offset (e.g., "2026-11-16 08:45:55-05:00"). The `day_of_week` field matches that same local date.
+   - In EVERY `agentInstructions` entry, the instruction MUST begin with exactly one line in this format:
+     Current date/time: YYYY-MM-DD (DayOfWeek), HH:MM (UTC offset)
+     Copy the value verbatim from REQUEST_CONTEXT (use `day_of_week`, drop the seconds). Do NOT convert or recompute it — no timezone arithmetic of any kind.
+   - Resolve relative references ("tonight", "tomorrow", "next Friday") against that local date and time.
+   - Agents have no other reliable source of the current date; omitting this line causes date hallucinations. Never omit it, even for single-agent routing.
+
 # Output Contract (JSON only)
 Return **only** a single JSON object that conforms to the JSON Schema below. No prose, no markdown, no extra keys.
 
