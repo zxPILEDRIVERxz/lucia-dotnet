@@ -22,6 +22,10 @@ public sealed class ProductionCommandPatternTests
     [Theory]
     // Questions and statements that happen to end in "on" or "off"
     [InlineData("can you tell me whether the office light is on")]
+    // Generic "is X open/closed" questions name no security device. Live bug:
+    // "is the market open?" fast-pathed a security status query for "market".
+    [InlineData("is the market open?")]
+    [InlineData("is the office open")]
     [InlineData("tell me if the office lights are on")]
     [InlineData("i wonder if the office lights are on")]
     [InlineData("who left the porch light on")]

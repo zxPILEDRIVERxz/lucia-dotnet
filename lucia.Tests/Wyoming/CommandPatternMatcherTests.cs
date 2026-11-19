@@ -289,6 +289,37 @@ public sealed class CommandPatternMatcherTests
         Assert.Equal("front door", result.CapturedValues!["entity"]);
     }
 
+    [Theory]
+    // Generic "is X open" questions are not home-device queries. Live bug:
+    // "is the market open?" dispatched a security status query for "market".
+    [InlineData("is the market open?")]
+    [InlineData("is the store open")]
+    [InlineData("are the shops closed")]
+    public void Match_StatusQuestionWithNonSecurityEntity_DoesNotMatch(string transcript)
+    {
+        var matcher = CreateMatcher(SecurityStateQuery);
+
+        var result = matcher.Match(transcript);
+
+        Assert.False(result.IsMatch, $"'{transcript}' should not match the security state query");
+    }
+
+    [Theory]
+    // Security-device nouns still take the fast path.
+    [InlineData("is the front door locked", "front door")]
+    [InlineData("are the garage doors open", "garage doors")]
+    [InlineData("is the gate unlocked", "gate")]
+    public void Match_SecurityStateQuestionWithDeviceEntity_StillMatches(string transcript, string entity)
+    {
+        var matcher = CreateMatcher(SecurityStateQuery);
+
+        var result = matcher.Match(transcript);
+
+        Assert.True(result.IsMatch, $"'{transcript}' should still match the security state query");
+        Assert.Equal("SecurityControlSkill", result.MatchedPattern!.SkillId);
+        Assert.Equal(entity, result.CapturedValues!["entity"]);
+    }
+
     [Fact]
     public void Match_StatusQuestion_DoesNotMatchCommandPatterns()
     {

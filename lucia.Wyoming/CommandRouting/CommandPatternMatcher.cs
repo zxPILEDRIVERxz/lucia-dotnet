@@ -77,6 +77,15 @@ public sealed class CommandPatternMatcher(CommandPatternRegistry registry)
                     continue;
                 }
 
+                // "is the market open?" reads like a device query but names no
+                // home device. Keep security matches only when the captured
+                // entity contains a security-device token; anything else goes
+                // to the LLM router.
+                if (pattern.SkillId == "SecurityControlSkill" && !EntityCaptureNamesSecurityDevice(captures))
+                {
+                    continue;
+                }
+
                 matchedPattern = pattern;
                 capturedValues = captures;
                 bestTemplate = template;
@@ -734,6 +743,31 @@ public sealed class CommandPatternMatcher(CommandPatternRegistry registry)
     private static readonly HashSet<string> LightIdentifyingTokens = new(StringComparer.OrdinalIgnoreCase)
     {
         "light", "lights", "lamp", "lamps",
+    };
+
+    /// <summary>
+    /// Returns <c>true</c> when the pattern has no <c>{entity}</c> capture or
+    /// the capture contains a token that identifies a device in the security
+    /// skill's domains (alarm_control_panel, lock, cover). Patterns without an
+    /// entity capture ("security status") are kept. "is the market open?" has
+    /// no such token and falls to the LLM router.
+    /// </summary>
+    private static bool EntityCaptureNamesSecurityDevice(Dictionary<string, string> captures) =>
+        !captures.TryGetValue("entity", out var entityValue)
+        || entityValue.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(SecurityDeviceTokens.Contains);
+
+    /// <summary>
+    /// Tokens that identify a security device in a capture value. The fast
+    /// path only dispatches SecurityControlSkill when the captured entity
+    /// names something from the alarm, lock, or cover domains.
+    /// </summary>
+    private static readonly HashSet<string> SecurityDeviceTokens = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "door", "doors",
+        "garage", "garages",
+        "gate", "gates",
+        "lock", "locks",
+        "alarm",
     };
 
     /// <summary>
